@@ -381,6 +381,11 @@ Battery (CMD 0x20): `<< 00 20 01 00 5C …` → 0x5C = **92 %** [O] (byte 3 of t
 - Fn layer (`0x12` table, "Fn Switch Function" / "Fn Layer" in the original UI, language strings 291-292)
   works over the receiver with the settings value `fn_switch` = 0, so that value does not gate the Fn layer [O].
   What `fn_switch` changes on the keyboard is still [U].
+- `fn_switch` writers [O]: FUN_00417910 and FUN_00417a90 are the click handlers of a pair of
+  `MUI::KeyLayerButton`s (this+0x374 / +0x378). Each unchecks the other button, stores
+  `fn_switch` = 0 (FUN_00417910) or 1 (FUN_00417a90) in the settings table, then enqueues event 0x0B
+  (send settings). So `fn_switch` follows a two-button layer selector; its effect on the keyboard is [U]
+  (hypothesis: 1 makes the Fn layer the default, i.e. an Fn lock).
 - Fn-layer key map (CMD 0x12, 21 packets) with `fn.Pause = 03 E2 00 00` (mute): Fn+Pause mutes,
   Pause alone unchanged [O]. Writing the table again with all zeros restores the default [O].
 - The ack reply for key-map slices echoes CMD/LEN/IDX but returns zero payload [O].

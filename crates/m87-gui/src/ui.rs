@@ -500,23 +500,24 @@ impl Ui {
         self.add(K_NORMAL, Some(Keys), w!("BUTTON"), Some(T::LayerNormal), BS_AUTORADIOBUTTON | WS_GROUP.0 | WS_TABSTOP.0, 0, [110, 78, 120, 24], Font::Normal);
         self.add(K_FN, Some(Keys), w!("BUTTON"), Some(T::LayerFn), BS_AUTORADIOBUTTON, 0, [236, 78, 230, 24], Font::Normal);
         self.label(K_CHANGED, Some(Keys), Some(T::ChangedYellow), [480, 80, 476, 20]);
-        self.add(K_VIEW, Some(Keys), w!("M87KeyboardView"), None, 0, 0, [24, 108, 932, 230], Font::Normal);
-        self.label(K_SELECTED, Some(Keys), None, [24, 346, 932, 22]);
-        self.label(K_BASIC_LBL, Some(Keys), Some(T::Basic), [24, 380, 90, 20]);
-        self.button(K_DEFAULT, Keys, T::NormalFunction, [120, 374, 160, 28]);
-        self.button(K_DISABLED, Keys, T::DoNothing, [288, 374, 140, 28]);
-        self.label(K_KEY_LBL, Some(Keys), Some(T::KeyRow), [24, 416, 90, 20]);
-        self.button(K_CHOOSE, Keys, T::ChooseKey, [120, 410, 220, 28]);
+        self.add(K_VIEW, Some(Keys), w!("M87KeyboardView"), None, 0, 0, [24, 106, 932, 272], Font::Normal);
+        self.label(K_SELECTED, Some(Keys), None, [24, 386, 932, 22]);
+        self.label(K_BASIC_LBL, Some(Keys), Some(T::Basic), [24, 424, 90, 20]);
+        self.button(K_DEFAULT, Keys, T::NormalFunction, [120, 418, 160, 30]);
+        self.button(K_DISABLED, Keys, T::DoNothing, [288, 418, 140, 30]);
+        self.label(K_KEY_LBL, Some(Keys), Some(T::KeyRow), [24, 466, 90, 20]);
+        self.button(K_CHOOSE, Keys, T::ChooseKey, [120, 460, 220, 30]);
         for (i, (cid, name)) in [(K_CTRL, "Ctrl"), (K_SHIFT, "Shift"), (K_ALT, "Alt"), (K_WIN, "Win")].into_iter().enumerate() {
-            self.add(cid, Some(Keys), w!("BUTTON"), None, BS_AUTOCHECKBOX | WS_TABSTOP.0, 0, [356 + i as i32 * 76, 412, 72, 24], Font::Normal);
+            self.add(cid, Some(Keys), w!("BUTTON"), None, BS_AUTOCHECKBOX | WS_TABSTOP.0, 0, [120 + i as i32 * 76, 498, 72, 24], Font::Normal);
             set_text(self.h(cid), name);
         }
-        self.label(K_MOUSE_LBL, Some(Keys), Some(T::Mouse), [24, 452, 90, 20]);
-        self.combo(K_MOUSE, Some(Keys), [120, 448, 260, 300]);
-        self.label(K_MEDIA_LBL, Some(Keys), Some(T::Media), [24, 488, 90, 20]);
-        self.combo(K_MEDIA, Some(Keys), [120, 484, 260, 400]);
-        self.label(K_MACRO_LBL, Some(Keys), Some(T::Macro), [24, 524, 90, 20]);
-        self.combo(K_MACRO, Some(Keys), [120, 520, 260, 300]);
+        // Second column: the other kinds of action.
+        self.label(K_MOUSE_LBL, Some(Keys), Some(T::Mouse), [520, 424, 100, 20]);
+        self.combo(K_MOUSE, Some(Keys), [626, 420, 300, 300]);
+        self.label(K_MEDIA_LBL, Some(Keys), Some(T::Media), [520, 466, 100, 20]);
+        self.combo(K_MEDIA, Some(Keys), [626, 462, 300, 400]);
+        self.label(K_MACRO_LBL, Some(Keys), Some(T::Macro), [520, 508, 100, 20]);
+        self.combo(K_MACRO, Some(Keys), [626, 504, 300, 300]);
         self.button(K_APPLY, Keys, T::Apply, [24, 560, 200, 34]);
         self.button(K_RESET, Keys, T::ResetAll, [234, 560, 240, 34]);
         self.label(K_UNSENT, Some(Keys), None, [488, 568, 470, 20]);
@@ -1366,7 +1367,7 @@ fn paint_view(hwnd: HWND) {
         let drawn = G_CELL.with(|c| match c.try_borrow() {
             Ok(b) => match b.as_ref() {
                 Some(g) => {
-                    kbview::paint(mem, w, h, &g.app, mode, g.ui.small);
+                    kbview::paint(mem, w, h, &g.app, mode, g.ui.small, theme::CARD);
                     true
                 }
                 None => false,
@@ -1374,7 +1375,7 @@ fn paint_view(hwnd: HWND) {
             Err(_) => false,
         });
         if !drawn {
-            let br = CreateSolidBrush(COLORREF(0x0024_2020));
+            let br = CreateSolidBrush(kbview::colorref(theme::CARD));
             FillRect(mem, &rc, br);
             let _ = DeleteObject(br.into());
         }

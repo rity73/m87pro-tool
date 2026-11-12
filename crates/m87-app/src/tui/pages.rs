@@ -1,6 +1,5 @@
 //! Screen layout and the six pages.
 
-use m87_hid::list_interfaces;
 use m87_proto::keymap::{modifier, KeyAction, Layer, Mouse, MEDIA};
 use m87_proto::layout::KEYS;
 use m87_proto::lighting::{Effect, Rgb, MAX_LEVEL};
@@ -8,12 +7,12 @@ use m87_proto::settings::SLEEP_CHOICES;
 use m87_proto::Link;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Span;
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::Frame;
 
 use super::widgets::*;
-use super::{App, Hit, Level, Tab, Target, Tone};
+use super::{App, Confirm, Hit, Level, Tab, Target, Tone};
 
 const MIN_W: u16 = 80;
 const MIN_H: u16 = 24;
@@ -48,8 +47,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     r.text(f, " M87 Pro ", Style::new().add_modifier(Modifier::BOLD).fg(Color::Black).bg(Color::Cyan))
         .gap(2)
         .text(f, &conn, conn_style);
-    let quit = Rect::new(top.right().saturating_sub(8), top.y, 8, 1);
-    f.render_widget(Paragraph::new(Span::styled(" Quit X ", BTN)), quit);
+    let quit = Rect::new(top.right().saturating_sub(10), top.y, 10, 1);
+    f.render_widget(Paragraph::new(Span::styled(" Quit (Q) ", BTN)), quit);
     app.hits.push((quit, Hit::Quit));
 
     let mut r = Row::new(tabs, tabs.y, &mut app.hits);
@@ -68,7 +67,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Tab::Keys => key_mapping(f, app, body),
         Tab::Macros => macros(f, app, body),
         Tab::Settings => settings(f, app, body),
-        Tab::Device => device(f, app, body),
+        Tab::Profiles => profiles(f, app, body),
     }
 
     let tone = match app.status.0 {
@@ -76,9 +75,21 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Tone::Ok => Style::new().fg(Color::LightGreen),
         Tone::Err => Style::new().fg(Color::LightRed),
     };
-    f.render_widget(Paragraph::new(Span::styled(format!(" {}", app.status.1), tone)), status);
+    // A long message (usually an error with advice) continues on the help
+    // line instead of being cut off.
+    let msg = format!(" {}", app.status.1);
+    if msg.chars().count() > status.width as usize {
+        let both = Rect::new(status.x, status.y, status.width, 2);
+        f.render_widget(Paragraph::new(Span::styled(msg, tone)).wrap(Wrap { trim: false }), both);
+        return;
+    }
+    f.render_widget(Paragraph::new(Span::styled(msg, tone)), status);
     let hint = if app.macro_editing {
         " Typing a macro: Enter = save and send, Esc = cancel, Left/Right/Home/End = move"
+    } else if app.name_editing {
+        " Typing a profile name: Enter = save, Esc = cancel"
+    } else if app.confirm.is_some() {
+        " Click Yes or Cancel  Esc cancel"
     } else {
         match app.tab {
             Tab::Lighting => " 1-6 page  Up/Down effect  Left/Right brightness  Enter apply  Q quit  Mouse: click, scroll",
@@ -87,7 +98,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             Tab::Keys => " 1-6 page  Arrows select key  Enter apply  Q quit  Mouse: click",
             Tab::Macros => " 1-6 page  Up/Down select macro  Enter apply  Q quit  Mouse: click, scroll",
             Tab::Settings => " 1-6 page  Enter apply  Q quit  Mouse: click",
-            Tab::Device => " 1-6 page  Q quit  Mouse: click",
+            Tab::Profiles => " 1-6 page  Q quit  Mouse: click",
         }
     };
     f.render_widget(Paragraph::new(Span::styled(hint, DIM)), help);
@@ -181,7 +192,7 @@ fn key_colors(f: &mut Frame, app: &mut App, body: Rect) {
     apply_button(f, &mut app.hits, a, y + 2, "");
     if y + 3 < a.bottom() {
         f.render_widget(
-            Paragraph::new(Span::styled("This page starts with all keys off because the keyboard cannot report its colors.", DIM)),
+            Paragraph::new(Span::styled("Shows the colors last sent from this PC. The keyboard cannot report its colors.", DIM)),
             Rect::new(a.x, y + 3, a.width, 1),
         );
     }
@@ -452,45 +463,126 @@ fn settings(f: &mut Frame, app: &mut App, body: Rect) {
     }
 }
 
-// ------------------------------------------------------------ 6 Device
+// ------------------------------------------------------------ 6 Profiles
 
-fn device(f: &mut Frame, app: &mut App, body: Rect) {
-    let block = Block::bordered().title(" Device ");
+fn section(f: &mut Frame, a: Rect, y: u16, title: &str) {
+    if y < a.bottom() {
+        f.render_widget(Paragraph::new(Span::styled(title.to_string(), Style::new().add_modifier(Modifier::BOLD))), Rect::new(a.x, y, a.width, 1));
+    }
+}
+
+/// Yes / Cancel buttons for the open question, after `r`.
+fn confirm_buttons(f: &mut Frame, r: &mut Row, question: &str) {
+    r.text(f, question, Style::new().fg(Color::Yellow)).gap(1);
+    r.button(f, " Yes ", BTN_WARN, Some(Hit::Confirm(true))).gap(1);
+    r.button(f, " Cancel ", BTN, Some(Hit::Confirm(false)));
+}
+
+fn profiles(f: &mut Frame, app: &mut App, body: Rect) {
+    let block = Block::bordered().title(" Profiles: save and restore complete setups ");
     let a = block.inner(body);
     f.render_widget(block, body);
-    let ports = list_interfaces();
-    let mut lines = vec![
-        Line::from(vec![Span::styled("Connection   ", LABEL), Span::raw(app.link.map(|l| l.label()).unwrap_or("Not connected"))]),
-        Line::from(vec![
-            Span::styled("Battery      ", LABEL),
-            Span::raw(match (app.link, app.battery) {
-                (Some(Link::Dongle), Some(b)) => format!("{b}%"),
-                (Some(Link::Dongle), None) => "Unknown (keyboard did not answer)".into(),
-                (Some(Link::Wired), _) => "Not reported over the USB cable (charging)".into(),
-                (None, _) => "-".into(),
-            }),
-        ]),
-        Line::from(vec![Span::styled("Saved data   ", LABEL), Span::raw(crate::state::path().display().to_string())]),
-        Line::from(""),
-        Line::styled("USB interfaces found", LABEL),
-    ];
-    for p in &ports {
-        lines.push(Line::from(format!(
-            "  {:<18} port {:<2}  usage {:04X}:{:04X}  {}",
-            p.link.label(),
-            p.info.interface,
-            p.info.usage_page,
-            p.info.usage,
-            p.role.label()
-        )));
+    let mut y = a.y;
+
+    // Profiles.
+    section(f, a, y, "Saved profiles");
+    y += 1;
+    let mut r = Row::new(a, y, &mut app.hits);
+    r.indent(2).gap(2);
+    if app.profiles.is_empty() {
+        r.text(f, "None yet. Type a name below and click Save.", DIM);
     }
-    if ports.is_empty() {
-        lines.push(Line::styled("  None. Connect the USB cable or plug in the 2.4 GHz receiver.", DIM));
+    for (i, name) in app.profiles.iter().enumerate() {
+        let style = if app.profile_sel == Some(i) { BTN_ON } else { BTN };
+        r.button(f, &format!(" {name} "), style, Some(Hit::ProfileSelect(i))).gap(1);
     }
-    let n = lines.len() as u16;
-    f.render_widget(Paragraph::new(lines), Rect::new(a.x, a.y, a.width, n.min(a.height)));
-    if a.y + n + 1 < a.bottom() {
-        let mut r = Row::new(a, a.y + n + 1, &mut app.hits);
-        r.button(f, "  Check connection again  ", BTN, Some(Hit::Recheck));
+    y = r.y + 2;
+
+    let mut r = Row::new(a, y, &mut app.hits);
+    r.text(f, "Name      ", LABEL);
+    let field_w = 30u16;
+    let field = Rect::new(r.x, y, field_w.min(a.right().saturating_sub(r.x)), 1);
+    let (text, cur) = app.name_input.view(field.width as usize);
+    let field_style = if app.name_editing { Style::new().fg(Color::Black).bg(Color::White) } else { Style::new().fg(Color::White).bg(Color::Rgb(50, 50, 50)) };
+    f.render_widget(Paragraph::new(format!("{text:<w$}", w = field.width as usize)).style(field_style), field);
+    if app.name_editing {
+        f.set_cursor_position(Position::new(field.x + cur as u16, y));
+    }
+    r.hits.push((field, Hit::ProfileName));
+    r.gap(field.width + 1);
+    let typed = app.name_input.text();
+    let exists = app.profiles.iter().any(|p| p.eq_ignore_ascii_case(typed.trim()));
+    let label = if exists { " Replace profile " } else { " Save current setup " };
+    r.button(f, label, BTN_MAIN, Some(Hit::ProfileSave));
+    y = r.y + 1;
+    if y < a.bottom() {
+        f.render_widget(
+            Paragraph::new(Span::styled("          Saves the lighting, keys, macros and settings last sent.", DIM)),
+            Rect::new(a.x, y, a.width, 1),
+        );
+    }
+    y += 2;
+
+    let sel = app.selected_profile().map(String::from);
+    let mut r = Row::new(a, y, &mut app.hits);
+    r.text(f, "Selected  ", LABEL);
+    match &sel {
+        Some(n) => {
+            r.text(f, &format!("{n}  "), Style::new().add_modifier(Modifier::BOLD));
+            r.button(f, " Load to keyboard ", BTN_MAIN, Some(Hit::ProfileLoad)).gap(1);
+            if matches!(&app.confirm, Some(Confirm::DeleteProfile(_))) {
+                confirm_buttons(f, &mut r, "Delete it?");
+            } else {
+                r.button(f, " Delete ", BTN, Some(Hit::ProfileDelete));
+            }
+        }
+        None => {
+            r.text(f, "none. Click a profile above.", DIM);
+        }
+    }
+    y = r.y + 1;
+    if sel.is_some() && y < a.bottom() {
+        f.render_widget(
+            Paragraph::new(Span::styled("          Load replaces everything on the keyboard.", DIM)),
+            Rect::new(a.x, y, a.width, 1),
+        );
+    }
+    y += 2;
+    let mut r = Row::new(a, y, &mut app.hits);
+    r.text(f, "Files     ", LABEL);
+    r.button(f, " Open profile folder ", BTN, Some(Hit::OpenFolder)).gap(2);
+    r.text(f, "Copy .txt files there to back up or share.", DIM);
+    y = r.y + 2;
+
+    // Factory reset.
+    section(f, a, y, "Factory reset");
+    y += 1;
+    let mut r = Row::new(a, y, &mut app.hits);
+    r.indent(2).gap(2);
+    if matches!(app.confirm, Some(Confirm::FactoryReset)) {
+        confirm_buttons(f, &mut r, "Erase every change on the keyboard?");
+    } else {
+        r.button(f, " Factory reset ", BTN_WARN, Some(Hit::FactoryReset)).gap(2);
+        r.text(f, "Erases all changes on the keyboard. Profiles are kept.", DIM);
+    }
+    y = r.y + 2;
+
+    // Connection.
+    section(f, a, y, "Connection");
+    y += 1;
+    let battery = match (app.link, app.battery) {
+        (Some(Link::Dongle), Some(b)) => format!("   Battery {b}%"),
+        (Some(Link::Wired), _) => "   Charging (battery level is not reported over the cable)".into(),
+        _ => String::new(),
+    };
+    let mut r = Row::new(a, y, &mut app.hits);
+    r.indent(2).gap(2);
+    r.text(f, app.link.map(|l| l.label()).unwrap_or("Not connected"), Style::new().fg(Color::White));
+    r.text(f, &battery, LABEL).gap(2);
+    r.button(f, " Check again ", BTN, Some(Hit::Recheck));
+    y = r.y + 1;
+    if y < a.bottom() {
+        let text = format!("  Data saved in {}", crate::state::path().parent().map(|p| p.display().to_string()).unwrap_or_default());
+        f.render_widget(Paragraph::new(Span::styled(text, DIM)), Rect::new(a.x, y, a.width, 1));
     }
 }

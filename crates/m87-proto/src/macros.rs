@@ -190,7 +190,9 @@ pub fn storage(macros: &[Option<Macro>]) -> Result<Vec<u8>, String> {
     if macros.len() > SLOTS {
         return Err(format!("at most {SLOTS} macros can be stored"));
     }
-    let mut buf = vec![0u8; SLOTS * 4];
+    // Every slot starts as "no macro" (FF FF FF FF), including the slots
+    // after the last macro, so an empty list really clears the keyboard.
+    let mut buf = vec![0xFFu8; SLOTS * 4];
     for (i, m) in macros.iter().enumerate() {
         let entries = m.as_ref().map(|m| m.entries()).unwrap_or_default();
         if entries.is_empty() {
@@ -200,6 +202,8 @@ pub fn storage(macros: &[Option<Macro>]) -> Result<Vec<u8>, String> {
         let off = buf.len();
         buf[i * 4] = off as u8;
         buf[i * 4 + 1] = (off >> 8) as u8;
+        buf[i * 4 + 2] = 0;
+        buf[i * 4 + 3] = 0;
         let cnt = entries.len();
         buf.extend_from_slice(&[cnt as u8, (cnt >> 8) as u8, 0, 0, 0, 0, 0, 0]);
         for e in entries {
@@ -246,7 +250,8 @@ mod tests {
         let buf = storage(&[Some(m), None]).unwrap();
         assert_eq!(&buf[0..4], &[0x90, 0x01, 0, 0]);
         assert_eq!(&buf[4..8], &[0xFF; 4]);
-        assert_eq!(&buf[8..12], &[0, 0, 0, 0]);
+        assert_eq!(&buf[8..12], &[0xFF; 4]);
+        assert!(storage(&[]).unwrap().iter().all(|b| *b == 0xFF));
         assert_eq!(&buf[0x190..0x198], &[4, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(&buf[0x198..0x1A8], &[0, 0, 0x04, 0xB0, 20, 0, 0, 0x50, 0, 0, 0x04, 0x30, 20, 0, 0, 0x50]);
         assert_eq!(buf.len(), 0x1A8);

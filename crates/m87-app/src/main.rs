@@ -13,7 +13,7 @@ use m87_proto::{hex, Link};
 mod state;
 mod tui;
 
-use state::State;
+use state::{LightMode, State};
 
 #[derive(Parser)]
 #[command(name = "m87", version, about = "Configure the M87 Pro keyboard. Run without a command to open the full-screen interface.")]
@@ -55,6 +55,52 @@ enum Command {
     /// Create, list or delete macros (key sequences played by the keyboard).
     #[command(subcommand)]
     Macro(MacroCmd),
+    /// Save, load, export and import complete setups (lighting, keys, macros, settings).
+    #[command(subcommand)]
+    Profile(ProfileCmd),
+    /// Erase all changes on the keyboard: default lighting, every key normal,
+    /// no macros, default settings. Profiles saved on this PC are kept.
+    FactoryReset {
+        /// Confirm the reset. Without it nothing is sent.
+        #[arg(long)]
+        yes: bool,
+        #[command(flatten)]
+        send: SendOpts,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProfileCmd {
+    /// List the saved profiles.
+    List,
+    /// Save the current setup (the last one sent to the keyboard) as a profile.
+    Save {
+        /// Profile name: letters, digits, spaces, - or _.
+        name: String,
+    },
+    /// Send a saved profile to the keyboard. This replaces everything on it.
+    Load {
+        name: String,
+        #[command(flatten)]
+        send: SendOpts,
+    },
+    /// Delete a saved profile from this PC.
+    Delete { name: String },
+    /// Write a profile, or the current setup, to a file you choose.
+    Export {
+        /// File to write, for example D:\backup\m87.txt
+        file: std::path::PathBuf,
+        /// Profile to export. Without it, the current setup is exported.
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Add a profile from a file (for example one made with export).
+    Import {
+        file: std::path::PathBuf,
+        /// Name for the new profile. Default: the file name.
+        #[arg(long)]
+        name: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -330,6 +376,7 @@ fn run(cli: Cli) -> Result<()> {
         | Command::Settings(_)
         | Command::Actions
         | Command::Macro(_)) => return run_m3(c, cli.verbose),
+        c @ (Command::Profile(_) | Command::FactoryReset { .. }) => return run_m4(c, cli.verbose),
         Command::Light(a) => {
             let effect = Effect::from_name(&a.effect)
                 .with_context(|| format!("unknown effect \"{}\". Run `m87 effects` to see the list", a.effect))?;
@@ -346,6 +393,10 @@ fn run(cli: Cli) -> Result<()> {
                 direction: a.direction,
             };
             if send(&a.send, cli.verbose, |link| plan::set_effect(link, &l))? {
+                let mut st = State::load()?;
+                st.light_mode = LightMode::Effect;
+                st.lighting = l;
+                st.save()?;
                 println!("Applied: {}", effect.name());
             }
         }
@@ -369,10 +420,101 @@ fn run(cli: Cli) -> Result<()> {
                 colors.push((key.index, c));
             }
             if send(&a.send, cli.verbose, |link| plan::set_key_colors(link, a.brightness, &colors))? {
+                let mut st = State::load()?;
+                st.light_mode = LightMode::KeyColors;
+                st.key_brightness = a.brightness;
+                st.key_colors = colors
+                    .iter()
+                    .filter(|(_, c)| *c != Rgb::default())
+                    .filter_map(|(i, c)| KEYS.iter().find(|k| k.index == *i).map(|k| (k.id, *c)))
+                    .collect();
+                st.save()?;
                 let lit = colors.iter().filter(|(_, c)| *c != Rgb::default()).count();
                 println!("Applied: per-key colors ({lit} of {} keys lit)", KEYS.len());
             }
         }
+    }
+    Ok(())
+}
+
+fn run_m4(command: Command, verbose: bool) -> Result<()> {
+    match command {
+        Command::Profile(ProfileCmd::List) => {
+            let names = state::list_profiles();
+            if names.is_empty() {
+                println!("No profiles saved. Save the current setup with: m87 profile save <NAME>");
+            }
+            for n in names {
+                println!("{n}");
+            }
+            println!("(Profiles are in {})", state::profile_dir().display());
+        }
+        Command::Profile(ProfileCmd::Save { name }) => {
+            let existed = state::profile_path(&name)?.exists();
+            let p = State::load()?.save_profile(&name)?;
+            let verb = if existed { "Replaced" } else { "Saved" };
+            println!("{verb} profile \"{}\" ({})", name.trim(), p.display());
+        }
+        Command::Profile(ProfileCmd::Load { name, send: opts }) => {
+            let st = State::load_profile(&name)?;
+            let plan_for = |link| st.full_plan(link).map_err(|e| anyhow::anyhow!(e));
+            plan_for(Link::Dongle)?;
+            if send(&opts, verbose, |link| plan_for(link).unwrap_or_default())? {
+                st.save()?;
+                println!("Applied: profile \"{}\" is now on the keyboard.", name.trim());
+            }
+        }
+        Command::Profile(ProfileCmd::Delete { name }) => {
+            let p = state::profile_path(&name)?;
+            if !p.exists() {
+                bail!("there is no profile named \"{}\". Run `m87 profile list` to see the names", name.trim());
+            }
+            std::fs::remove_file(&p).with_context(|| format!("could not delete {}", p.display()))?;
+            println!("Deleted profile \"{}\".", name.trim());
+        }
+        Command::Profile(ProfileCmd::Export { file, name }) => {
+            let st = match &name {
+                Some(n) => State::load_profile(n)?,
+                None => State::load()?,
+            };
+            st.write_to(&file)?;
+            match name {
+                Some(n) => println!("Exported profile \"{}\" to {}", n.trim(), file.display()),
+                None => println!("Exported the current setup to {}", file.display()),
+            }
+        }
+        Command::Profile(ProfileCmd::Import { file, name }) => {
+            let st = State::read_file(&file)?;
+            let name = match name {
+                Some(n) => n,
+                None => file
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(String::from)
+                    .context("give the profile a name with --name")?,
+            };
+            let existed = state::profile_path(&name)?.exists();
+            st.save_profile(&name)?;
+            let verb = if existed { "replaced" } else { "added" };
+            println!("Profile \"{}\" {verb}. Send it to the keyboard with: m87 profile load \"{}\"", name.trim(), name.trim());
+        }
+        Command::FactoryReset { yes, send: opts } => {
+            if !yes && !opts.dry_run {
+                println!("This erases every change on the keyboard:");
+                println!("  - lighting goes back to the default effect");
+                println!("  - every key does its normal function");
+                println!("  - all macros are deleted");
+                println!("  - settings go back to their defaults");
+                println!("Profiles saved on this PC are kept.");
+                println!("To do it, run: m87 factory-reset --yes");
+                return Ok(());
+            }
+            if send(&opts, verbose, plan::factory_reset)? {
+                State::default().save()?;
+                println!("Applied: the keyboard is back to its factory settings.");
+            }
+        }
+        _ => unreachable!(),
     }
     Ok(())
 }

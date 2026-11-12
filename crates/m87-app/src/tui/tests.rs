@@ -114,7 +114,7 @@ fn settings_page() {
     let s = render(&mut app, 100, 30);
     println!("{s}");
     assert!(s.contains("Changes not sent yet"));
-    app.tab = Tab::Device;
+    app.tab = Tab::Profiles;
     render(&mut app, 100, 30);
     assert!(render(&mut app, 60, 20).contains("too small"));
 }
@@ -145,7 +145,7 @@ fn keyboard_shortcuts() {
     app.on_key(KeyCode::Char('4'), KeyModifiers::NONE);
     app.on_key(KeyCode::Down, KeyModifiers::NONE);
     assert_eq!(app.macro_sel, 2);
-    // Device page does not advertise Enter.
+    // Profiles page does not advertise Enter.
     app.on_key(KeyCode::Char('6'), KeyModifiers::NONE);
     assert!(!render(&mut app, 100, 30).contains("Enter"));
 }
@@ -188,6 +188,78 @@ fn pages_fit_80_columns() {
         app.tab = t;
         let s = render(&mut app, 80, 24);
         assert!(!s.contains("too small"), "{t:?}");
-        assert!(s.contains("6 Device"), "tabs must fit in 80 columns");
+        assert!(s.contains("6 Profiles"), "tabs must fit in 80 columns");
     }
+}
+
+#[test]
+fn profiles_page() {
+    let mut app = app();
+    app.tab = Tab::Profiles;
+    let s = render(&mut app, 100, 30);
+    println!("{s}");
+    assert!(s.contains("None yet"));
+    // Type a name and save.
+    click(&mut app, Hit::ProfileName);
+    for c in "Test profile".chars() {
+        app.on_key(KeyCode::Char(c), KeyModifiers::NONE);
+    }
+    assert!(!app.quit, "typing q must not quit");
+    app.on_key(KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(app.status.0, Tone::Ok, "{}", app.status.1);
+    assert_eq!(app.selected_profile(), Some("Test profile"));
+    let s = render(&mut app, 100, 30);
+    println!("{s}");
+    assert!(s.contains("Load to keyboard"));
+    assert!(s.contains("Replace profile"));
+    // Load asks for nothing and queues the send.
+    click(&mut app, Hit::ProfileLoad);
+    assert_eq!(app.pending, Some(Pending::LoadProfile("Test profile".into())));
+    app.pending = None;
+    // Delete needs a Yes.
+    render(&mut app, 100, 30);
+    click(&mut app, Hit::ProfileDelete);
+    let s = render(&mut app, 100, 30);
+    assert!(s.contains("Delete it?"), "{s}");
+    click(&mut app, Hit::Confirm(true));
+    assert_eq!(app.status.0, Tone::Ok, "{}", app.status.1);
+    assert!(app.profiles.is_empty());
+    // Bad names are refused with a clear message.
+    render(&mut app, 100, 30);
+    click(&mut app, Hit::ProfileName);
+    app.on_key(KeyCode::Char('/'), KeyModifiers::NONE);
+    app.on_key(KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(app.status.0, Tone::Err);
+    assert!(app.status.1.contains("cannot be used"), "{}", app.status.1);
+}
+
+#[test]
+fn factory_reset_needs_yes() {
+    let mut app = app();
+    app.tab = Tab::Profiles;
+    render(&mut app, 80, 24);
+    click(&mut app, Hit::FactoryReset);
+    assert_eq!(app.pending, None);
+    let s = render(&mut app, 80, 24);
+    println!("{s}");
+    assert!(s.contains("Erase every change"));
+    // Esc cancels.
+    app.on_key(KeyCode::Esc, KeyModifiers::NONE);
+    assert_eq!(app.confirm, None);
+    assert!(!app.quit, "Esc must not quit");
+    render(&mut app, 80, 24);
+    click(&mut app, Hit::FactoryReset);
+    render(&mut app, 80, 24);
+    click(&mut app, Hit::Confirm(true));
+    assert_eq!(app.pending, Some(Pending::FactoryReset));
+}
+
+#[test]
+fn long_errors_are_not_cut() {
+    let mut app = app();
+    let e = m87_hid::Error::KeyboardOffline.to_string();
+    app.status = (Tone::Err, format!("Not applied: {e}."));
+    let s = render(&mut app, 80, 24);
+    println!("{s}");
+    assert!(s.contains("then retry."), "{s}");
 }

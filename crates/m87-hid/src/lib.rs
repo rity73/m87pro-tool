@@ -26,19 +26,28 @@ pub enum Error {
 }
 
 impl fmt::Display for Error {
+    // Each message says what happened and what to do about it.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::Io(e) => write!(f, "USB communication failed: {e}"),
-            Error::NotFound => write!(f, "no M87 Pro keyboard or 2.4 GHz receiver was found"),
-            Error::OpenFailed(what, e) => {
-                write!(f, "the {what} was found, but its configuration port could not be opened: {e}")
-            }
-            Error::NoResponse(cmd) => write!(f, "the keyboard did not answer (command 0x{cmd:02X})"),
-            Error::KeyboardOffline => {
-                write!(f, "the receiver is plugged in, but the keyboard is off, asleep, or out of range")
-            }
-            Error::BadReply(r) => write!(f, "the keyboard sent an unexpected reply: {r}"),
-            Error::Unsupported(link) => write!(f, "this feature is not available over the {link}"),
+            Error::Io(e) => write!(f, "USB communication failed ({e}). Unplug the keyboard or receiver, plug it in again and retry"),
+            Error::NotFound => write!(
+                f,
+                "no M87 Pro keyboard or 2.4 GHz receiver was found. Connect the USB cable or plug in the receiver. Bluetooth connections cannot be configured"
+            ),
+            Error::OpenFailed(what, e) => write!(
+                f,
+                "the {what} was found, but its settings port could not be opened ({e}). Close the original M87 Pro software if it is running, then retry"
+            ),
+            Error::NoResponse(cmd) => write!(
+                f,
+                "the keyboard did not answer (command 0x{cmd:02X}). Press a key to wake it, move it closer to the receiver, then retry"
+            ),
+            Error::KeyboardOffline => write!(
+                f,
+                "the receiver is plugged in, but the keyboard is off, asleep or out of range. Turn it on or press a key to wake it, then retry"
+            ),
+            Error::BadReply(r) => write!(f, "the keyboard sent an unexpected reply ({r}). Retry; if it keeps happening, reconnect the keyboard"),
+            Error::Unsupported(link) => write!(f, "this is not available over the {link}"),
         }
     }
 }

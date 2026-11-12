@@ -38,7 +38,7 @@ pub struct Row<'a> {
     left: u16,
     right: u16,
     bottom: u16,
-    hits: &'a mut Vec<(Rect, Hit)>,
+    pub hits: &'a mut Vec<(Rect, Hit)>,
 }
 
 impl<'a> Row<'a> {

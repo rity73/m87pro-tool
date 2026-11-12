@@ -26,7 +26,7 @@ use ratatui::crossterm::execute;
 use ratatui::layout::{Position, Rect};
 use ratatui::{DefaultTerminal, Frame};
 
-use crate::state::State;
+use crate::state::{self, LightMode, State};
 use input::Input;
 
 pub const PALETTE: [(&str, Rgb); 10] = [
@@ -49,11 +49,11 @@ pub enum Tab {
     Keys,
     Macros,
     Settings,
-    Device,
+    Profiles,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 6] = [Tab::Lighting, Tab::KeyColors, Tab::Keys, Tab::Macros, Tab::Settings, Tab::Device];
+    pub const ALL: [Tab; 6] = [Tab::Lighting, Tab::KeyColors, Tab::Keys, Tab::Macros, Tab::Settings, Tab::Profiles];
     pub fn title(self) -> &'static str {
         match self {
             Tab::Lighting => "1 Lighting",
@@ -61,12 +61,12 @@ impl Tab {
             Tab::Keys => "3 Key mapping",
             Tab::Macros => "4 Macros",
             Tab::Settings => "5 Settings",
-            Tab::Device => "6 Device",
+            Tab::Profiles => "6 Profiles",
         }
     }
     /// Pages that end with an "Apply to keyboard" button.
     fn sends(self) -> bool {
-        !matches!(self, Tab::Device)
+        !matches!(self, Tab::Profiles)
     }
 }
 
@@ -115,6 +115,23 @@ pub enum Hit {
     // Settings page
     Toggle(u8),
     Sleep(u8),
+    // Profiles page
+    ProfileSelect(usize),
+    ProfileName,
+    ProfileSave,
+    ProfileLoad,
+    ProfileDelete,
+    OpenFolder,
+    FactoryReset,
+    /// Answer to the open confirmation question.
+    Confirm(bool),
+}
+
+/// A question that must be answered before something is erased.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Confirm {
+    DeleteProfile(String),
+    FactoryReset,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -125,10 +142,12 @@ pub enum Tone {
 }
 
 /// What the next "Apply" sends.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 enum Pending {
     Page(Tab),
     ResetKeys,
+    LoadProfile(String),
+    FactoryReset,
 }
 
 pub struct App {
@@ -155,6 +174,11 @@ pub struct App {
     pub macro_sel: u8,
     pub macro_input: Input,
     pub macro_editing: bool,
+    pub profiles: Vec<String>,
+    pub profile_sel: Option<usize>,
+    pub name_input: Input,
+    pub name_editing: bool,
+    pub confirm: Option<Confirm>,
 }
 
 impl App {
@@ -167,7 +191,8 @@ impl App {
             }
             Err(e) => app.status = (Tone::Err, format!("Saved settings could not be read: {e:#}")),
         }
-        app.load_macro_text();
+        app.sync_from_state();
+        app.profiles = state::list_profiles();
         app.scan(true);
         app
     }
@@ -195,6 +220,49 @@ impl App {
             macro_sel: 1,
             macro_input: Input::default(),
             macro_editing: false,
+            profiles: Vec::new(),
+            profile_sel: None,
+            name_input: Input::default(),
+            name_editing: false,
+            confirm: None,
+        }
+    }
+
+    /// Copy the lighting and key colors of `state` into the page drafts.
+    fn sync_from_state(&mut self) {
+        self.lighting = self.state.lighting;
+        self.key_colors = self.state.color_table();
+        self.key_brightness = self.state.key_brightness;
+        self.load_macro_text();
+    }
+
+    pub fn selected_profile(&self) -> Option<&str> {
+        self.profile_sel.and_then(|i| self.profiles.get(i)).map(|s| s.as_str())
+    }
+
+    fn refresh_profiles(&mut self, select: Option<&str>) {
+        self.profiles = state::list_profiles();
+        self.profile_sel = select.and_then(|n| self.profiles.iter().position(|p| p.eq_ignore_ascii_case(n)));
+    }
+
+    fn save_profile(&mut self) {
+        let name = self.name_input.text();
+        let name = match state::check_profile_name(&name) {
+            Ok(n) => n.to_string(),
+            Err(e) => {
+                self.status = (Tone::Err, format!("Not saved: {e}."));
+                return;
+            }
+        };
+        self.name_editing = false;
+        let existed = self.profiles.iter().any(|p| p.eq_ignore_ascii_case(&name));
+        match self.saved.save_profile(&name) {
+            Ok(_) => {
+                self.refresh_profiles(Some(&name));
+                let verb = if existed { "replaced" } else { "saved" };
+                self.status = (Tone::Ok, format!("Profile \"{name}\" {verb}."));
+            }
+            Err(e) => self.status = (Tone::Err, format!("Not saved: {e:#}.")),
         }
     }
 
@@ -218,9 +286,18 @@ impl App {
         }
     }
 
-    /// Packets for the pending operation, plus a success message.
-    fn packets(&self, what: Pending, link: Link) -> std::result::Result<(Vec<Packet>, String), String> {
-        Ok(match what {
+    /// Packets for the pending operation, a success message, and the new
+    /// complete state when the operation replaces everything.
+    fn packets(&self, what: &Pending, link: Link) -> std::result::Result<(Vec<Packet>, String, Option<State>), String> {
+        let (p, msg) = match what {
+            Pending::LoadProfile(name) => {
+                let st = State::load_profile(name).map_err(|e| format!("{e:#}."))?;
+                let p = st.full_plan(link)?;
+                return Ok((p, format!("Profile \"{name}\" is now on the keyboard."), Some(st)));
+            }
+            Pending::FactoryReset => {
+                return Ok((plan::factory_reset(link), "The keyboard is back to its factory settings.".into(), Some(State::default())));
+            }
             Pending::ResetKeys => (plan::reset_key_maps(link), "Every key does its normal function again.".into()),
             Pending::Page(Tab::KeyColors) => {
                 let colors: Vec<(u8, Rgb)> = KEYS.iter().map(|k| (k.index, self.key_colors[k.index as usize])).collect();
@@ -243,11 +320,13 @@ impl App {
                 (plan::set_macros(link, &buf), "All macros sent.".into())
             }
             Pending::Page(Tab::Settings) => (plan::set_settings(link, &self.state.settings), "Settings sent.".into()),
-            Pending::Page(_) => (
+            Pending::Page(Tab::Lighting) => (
                 plan::set_effect(link, &self.lighting),
                 format!("Effect \"{}\" sent.", self.lighting.effect.name()),
             ),
-        })
+            Pending::Page(Tab::Profiles) => return Err("There is nothing to send on this page.".into()),
+        };
+        Ok((p, msg, None))
     }
 
     fn apply_now(&mut self, what: Pending) {
@@ -259,7 +338,7 @@ impl App {
             }
         };
         let link = kb.link();
-        let (packets, msg) = match self.packets(what, link) {
+        let (packets, msg, whole) = match self.packets(&what, link) {
             Ok(x) => x,
             Err(e) => {
                 self.status = (Tone::Err, format!("Not applied: {e}"));
@@ -271,21 +350,40 @@ impl App {
             return;
         }
         self.link = Some(link);
-        let mut note = String::new();
-        if matches!(what, Pending::ResetKeys) {
-            self.state.clear_keys();
-        }
-        if matches!(what, Pending::ResetKeys | Pending::Page(Tab::Keys | Tab::Macros | Tab::Settings)) {
+        if let Some(st) = whole {
+            self.state = st.clone();
+            self.saved = st;
+            self.sync_from_state();
+        } else {
             // Only the part that was sent becomes "saved".
             match what {
+                Pending::ResetKeys => {
+                    self.state.clear_keys();
+                    self.saved.keys.clear();
+                }
+                Pending::Page(Tab::Keys) => self.saved.keys = self.state.keys.clone(),
                 Pending::Page(Tab::Macros) => self.saved.macros = self.state.macros.clone(),
                 Pending::Page(Tab::Settings) => self.saved.settings = self.state.settings,
-                _ => self.saved.keys = self.state.keys.clone(),
-            }
-            if let Err(e) = self.saved.save() {
-                note = format!(" (Could not save on this PC: {e:#})");
+                Pending::Page(Tab::Lighting) => {
+                    for st in [&mut self.state, &mut self.saved] {
+                        st.light_mode = LightMode::Effect;
+                        st.lighting = self.lighting;
+                    }
+                }
+                Pending::Page(Tab::KeyColors) => {
+                    for st in [&mut self.state, &mut self.saved] {
+                        st.light_mode = LightMode::KeyColors;
+                        st.set_color_table(&self.key_colors);
+                        st.key_brightness = self.key_brightness;
+                    }
+                }
+                _ => {}
             }
         }
+        let note = match self.saved.save() {
+            Ok(()) => String::new(),
+            Err(e) => format!(" (Could not save on this PC: {e:#})"),
+        };
         self.status = (Tone::Ok, format!("Applied over the {}. {msg}{note}", link.label()));
     }
 
@@ -349,14 +447,24 @@ impl App {
     }
 
     fn on_hit(&mut self, hit: Hit) {
-        // Clicking anywhere else ends macro text editing.
+        // Clicking anywhere else ends text editing.
         if !matches!(hit, Hit::MacroInput | Hit::MacroSave) {
             self.macro_editing = false;
+        }
+        if !matches!(hit, Hit::ProfileName | Hit::ProfileSave) {
+            self.name_editing = false;
+        }
+        if !matches!(hit, Hit::Confirm(_)) {
+            self.confirm = None;
         }
         match hit {
             Hit::Tab(t) => {
                 self.tab = t;
                 self.choosing_key = false;
+                if t == Tab::Profiles {
+                    let sel = self.selected_profile().map(String::from);
+                    self.refresh_profiles(sel.as_deref());
+                }
             }
             Hit::Effect(i) => self.select_effect(i),
             Hit::Palette(t, i) => {
@@ -471,6 +579,62 @@ impl App {
                 }
             }
             Hit::Sleep(v) => self.state.settings.sleep = v,
+            Hit::ProfileSelect(i) => {
+                if let Some(n) = self.profiles.get(i).cloned() {
+                    self.profile_sel = Some(i);
+                    self.name_input = Input::new(n);
+                }
+            }
+            Hit::ProfileName => self.name_editing = true,
+            Hit::ProfileSave => self.save_profile(),
+            Hit::ProfileLoad => match self.selected_profile().map(String::from) {
+                Some(n) => {
+                    self.status = (Tone::Info, format!("Sending profile \"{n}\"..."));
+                    self.pending = Some(Pending::LoadProfile(n));
+                }
+                None => self.status = (Tone::Err, "First click a profile in the list.".into()),
+            },
+            Hit::ProfileDelete => match self.selected_profile().map(String::from) {
+                Some(n) => {
+                    self.status = (Tone::Info, format!("Delete profile \"{n}\" from this PC?"));
+                    self.confirm = Some(Confirm::DeleteProfile(n));
+                }
+                None => self.status = (Tone::Err, "First click a profile in the list.".into()),
+            },
+            Hit::OpenFolder => {
+                let dir = state::profile_dir();
+                let opened = std::fs::create_dir_all(&dir).and_then(|_| std::process::Command::new("explorer").arg(&dir).spawn());
+                self.status = match opened {
+                    Ok(_) => (Tone::Info, format!("Opened {}", dir.display())),
+                    Err(e) => (Tone::Err, format!("Could not open {}: {e}", dir.display())),
+                };
+            }
+            Hit::FactoryReset => {
+                self.status = (Tone::Info, "Erase every change on the keyboard?".into());
+                self.confirm = Some(Confirm::FactoryReset);
+            }
+            Hit::Confirm(yes) => {
+                let Some(c) = self.confirm.take() else { return };
+                if !yes {
+                    self.status = (Tone::Info, "Cancelled.".into());
+                    return;
+                }
+                match c {
+                    Confirm::FactoryReset => {
+                        self.status = (Tone::Info, "Resetting the keyboard...".into());
+                        self.pending = Some(Pending::FactoryReset);
+                    }
+                    Confirm::DeleteProfile(n) => {
+                        let res = state::profile_path(&n).and_then(|p| std::fs::remove_file(&p).map_err(Into::into));
+                        self.status = match res {
+                            Ok(()) => (Tone::Ok, format!("Profile \"{n}\" deleted.")),
+                            Err(e) => (Tone::Err, format!("Not deleted: {e:#}.")),
+                        };
+                        self.refresh_profiles(None);
+                        self.name_input = Input::default();
+                    }
+                }
+            }
         }
     }
 
@@ -509,13 +673,29 @@ impl App {
             }
             return;
         }
+        if self.name_editing {
+            match code {
+                KeyCode::Enter => self.save_profile(),
+                KeyCode::Esc => {
+                    self.name_editing = false;
+                    self.status = (Tone::Info, "Cancelled.".into());
+                }
+                other => self.name_input.key(other),
+            }
+            return;
+        }
+        if self.confirm.is_some() && code == KeyCode::Esc {
+            self.on_hit(Hit::Confirm(false));
+            return;
+        }
         if self.choosing_key && code == KeyCode::Esc {
             self.choosing_key = false;
             self.status = (Tone::Info, "Cancelled.".into());
             return;
         }
         match code {
-            KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
+            // Esc never quits: people press it to cancel things.
+            KeyCode::Char('q') | KeyCode::Char('Q') => self.quit = true,
             KeyCode::Char('c') if mods.contains(KeyModifiers::CONTROL) => self.quit = true,
             KeyCode::Char(c @ '1'..='6') => self.tab = Tab::ALL[(c as u8 - b'1') as usize],
             KeyCode::Tab => {
@@ -617,12 +797,16 @@ fn event_loop(terminal: &mut DefaultTerminal) -> Result<()> {
         match event::read()? {
             Event::Key(k) if k.kind == KeyEventKind::Press => app.on_key(k.code, k.modifiers),
             Event::Paste(s) if app.macro_editing => app.macro_input.insert_str(&s),
+            Event::Paste(s) if app.name_editing => app.name_input.insert_str(&s),
             Event::Mouse(m) => match m.kind {
                 MouseEventKind::Down(MouseButton::Left) => {
                     dragging = true;
                     match app.hit_at(m.column, m.row) {
                         Some(h) => app.on_hit(h),
-                        None => app.macro_editing = false,
+                        None => {
+                            app.macro_editing = false;
+                            app.name_editing = false;
+                        }
                     }
                 }
                 MouseEventKind::Drag(MouseButton::Left) if dragging => {

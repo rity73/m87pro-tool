@@ -372,6 +372,10 @@ Battery (CMD 0x20): `<< 00 20 01 00 5C …` → 0x5C = **92 %** [O] (byte 3 of t
 
 - `00 1F` (reset keys): acknowledged; keys work normally afterwards and **lighting is unchanged** [O],
   so 0x1F resets the key maps only.
+- `00 0F` (factory reset), then the default lighting block: both acknowledged with an echo [O]. The
+  receiver stays paired (ping and battery answer right after), keys work normally and the default
+  Rolling rainbow effect shows [O].
+- Macro directory: unused entries are written as `FF FF FF FF`, including entries after the last macro.
 - Fn-layer key map (CMD 0x12, 21 packets) with `fn.Pause = 03 E2 00 00` (mute): Fn+Pause mutes,
   Pause alone unchanged [O]. Writing the table again with all zeros restores the default [O].
 - The ack reply for key-map slices echoes CMD/LEN/IDX but returns zero payload [O].

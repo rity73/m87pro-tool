@@ -191,6 +191,26 @@ pub fn set_macros(link: Link, storage: &[u8]) -> Vec<Packet> {
     }
 }
 
+/// Return the keyboard to its factory state: default lighting, every key
+/// normal, no macros, default settings.
+///
+/// Receiver: command 0x0F followed by the default lighting, as the original
+/// app does. USB cable: there is no single command, so every part is
+/// rewritten with its default, again as the original app does.
+pub fn factory_reset(link: Link) -> Vec<Packet> {
+    let mut out = match link {
+        Link::Dongle => vec![Packet::dongle(dongle::frame(dongle::cmd::FACTORY_RESET, 0, 0, &[]).unwrap(), 300)],
+        Link::Wired => {
+            let mut p = set_settings(link, &Settings::default());
+            p.extend(reset_key_maps(link));
+            p.extend(set_macros(link, &crate::macros::storage(&[]).unwrap()));
+            p
+        }
+    };
+    out.extend(set_effect(link, &Lighting::default()));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,6 +300,19 @@ mod tests {
         let last = &p[21].bytes;
         assert_eq!(&last[..4], &[0x00, 0x14, 0x10, 20]);
         assert_eq!(&last[4 + 14..4 + 16], &[0xAA, 0x55]);
+    }
+
+    #[test]
+    fn factory_reset_plans() {
+        let d = factory_reset(Link::Dongle);
+        assert_eq!(d.len(), 2);
+        assert_eq!(&d[0].bytes[..4], &[0, 0x0F, 0, 0]);
+        assert_eq!(d[1].bytes[1], 0x05);
+        let w = factory_reset(Link::Wired);
+        let cmds: Vec<u8> = w.iter().filter(|p| p.bytes[1] == 0x04).map(|p| p.bytes[2]).collect();
+        for c in [0x17, 0x11, 0x27, 0x15, 0x13] {
+            assert!(cmds.contains(&c), "{c:02X} missing");
+        }
     }
 
     #[test]

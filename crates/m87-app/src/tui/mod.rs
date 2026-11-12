@@ -537,6 +537,13 @@ impl App {
             }
             KeyCode::Up if self.tab == Tab::Macros => self.on_hit(Hit::MacroSelect(self.macro_sel.saturating_sub(1).max(1))),
             KeyCode::Down if self.tab == Tab::Macros => self.on_hit(Hit::MacroSelect((self.macro_sel + 1).min(100))),
+            KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right if self.tab == Tab::Keys => {
+                if self.choosing_key {
+                    self.status = (Tone::Info, "Click the new key with the mouse, or press Esc to cancel.".into());
+                } else if let Some(k) = next_key(self.map_key, code) {
+                    self.on_hit(Hit::MapKey(k.index));
+                }
+            }
             KeyCode::Left | KeyCode::Right => {
                 let d = if code == KeyCode::Left { -1 } else { 1 };
                 match self.tab {
@@ -547,6 +554,27 @@ impl App {
             }
             _ => {}
         }
+    }
+}
+
+/// Key reached from `from` with an arrow key on the keyboard picture.
+fn next_key(from: Option<&'static layout::Key>, code: KeyCode) -> Option<&'static layout::Key> {
+    let Some(from) = from else { return KEYS.iter().find(|k| k.id == "Esc") };
+    let center = |k: &layout::Key| 2 * k.x4 as i32 + k.w4 as i32;
+    match code {
+        KeyCode::Left | KeyCode::Right => {
+            let row = KEYS.iter().filter(|k| k.row == from.row);
+            if code == KeyCode::Left {
+                row.filter(|k| k.x4 < from.x4).max_by_key(|k| k.x4)
+            } else {
+                row.filter(|k| k.x4 > from.x4).min_by_key(|k| k.x4)
+            }
+        }
+        KeyCode::Up | KeyCode::Down => {
+            let row = if code == KeyCode::Up { from.row.checked_sub(1)? } else { from.row + 1 };
+            KEYS.iter().filter(|k| k.row == row).min_by_key(|k| (center(k) - center(from)).abs())
+        }
+        _ => None,
     }
 }
 

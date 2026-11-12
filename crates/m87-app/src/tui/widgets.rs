@@ -142,6 +142,14 @@ pub fn level_row(
     r.text(f, note, DIM);
 }
 
+/// Area for the keyboard picture at the top of `a`. Every page that shows
+/// the keyboard uses this, so the picture looks the same everywhere: keys
+/// two lines tall when the window is tall enough, otherwise one.
+pub fn keyboard_area(a: Rect) -> Rect {
+    let h: u16 = if a.height >= 24 { 13 } else { 7 };
+    Rect::new(a.x, a.y, a.width, h.min(a.height))
+}
+
 /// Screen rectangle of each key, scaled to fit `area`. Keys are two lines
 /// tall when there is room, otherwise one.
 pub fn key_rects(area: Rect) -> Vec<(&'static Key, Rect)> {

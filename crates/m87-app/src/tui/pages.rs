@@ -80,7 +80,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let hint = if app.macro_editing {
         " Typing a macro: Enter = save and send, Esc = cancel, Left/Right/Home/End = move"
     } else {
-        " 1-6 page  Up/Down select  Left/Right brightness  Enter apply  Q quit  Mouse: click, drag, scroll"
+        match app.tab {
+            Tab::Lighting => " 1-6 page  Up/Down effect  Left/Right brightness  Enter apply  Q quit  Mouse: click, scroll",
+            Tab::KeyColors => " 1-6 page  Left/Right brightness  Enter apply  Q quit  Mouse: click or drag to paint",
+            Tab::Keys if app.choosing_key => " Click the new key with the mouse  Esc cancel",
+            Tab::Keys => " 1-6 page  Arrows select key  Enter apply  Q quit  Mouse: click",
+            Tab::Macros => " 1-6 page  Up/Down select macro  Enter apply  Q quit  Mouse: click, scroll",
+            Tab::Settings => " 1-6 page  Enter apply  Q quit  Mouse: click",
+            Tab::Device => " 1-6 page  Q quit  Mouse: click",
+        }
     };
     f.render_widget(Paragraph::new(Span::styled(hint, DIM)), help);
 }
@@ -152,8 +160,7 @@ fn key_colors(f: &mut Frame, app: &mut App, body: Rect) {
     let block = Block::bordered().title(" Key colors: pick a brush color, then click or drag over keys ");
     let a = block.inner(body);
     f.render_widget(block, body);
-    let kb_h = a.height.saturating_sub(6).min(13);
-    let kb_area = Rect::new(a.x, a.y, a.width, kb_h);
+    let kb_area = keyboard_area(a);
     for (k, rect) in key_rects(kb_area) {
         let c = app.key_colors[k.index as usize];
         let style = if c == Rgb::default() {
@@ -191,20 +198,12 @@ fn action_label(a: KeyAction) -> String {
 }
 
 fn key_mapping(f: &mut Frame, app: &mut App, body: Rect) {
-    let block = Block::bordered().title(" Key mapping: click a key, then choose what it does ");
+    let block = Block::bordered().title(" Key mapping: click a key, then choose what it does. Changed keys are yellow. ");
     let a = block.inner(body);
     f.render_widget(block, body);
 
-    // Layer switch.
-    let mut r = Row::new(a, a.y, &mut app.hits);
-    r.text(f, "Layer   ", LABEL);
-    for (l, name) in [(Layer::Base, " Normal "), (Layer::Fn, " While Fn is held ")] {
-        r.button(f, name, if app.layer == l { BTN_ON } else { BTN }, Some(Hit::Layer(l))).gap(1);
-    }
-    r.gap(2).text(f, "Changed keys are yellow.", DIM);
-
-    // Keyboard, one line per row so the action list fits below.
-    let kb_area = Rect::new(a.x, a.y + 2, a.width, 7);
+    // Same keyboard picture as the Key colors page.
+    let kb_area = keyboard_area(a);
     for (k, rect) in key_rects(kb_area) {
         let action = app.state.key(app.layer, k.id);
         let selected = app.map_key.map(|m| m.index) == Some(k.index);
@@ -221,30 +220,41 @@ fn key_mapping(f: &mut Frame, app: &mut App, body: Rect) {
         app.hits.push((rect, Hit::MapKey(k.index)));
     }
 
-    let mut y = kb_area.bottom() + 1;
+    // A blank line under the keyboard, like on the Key colors page. Only in
+    // a window too small for everything is it dropped.
+    let below = Rect::new(a.x, kb_area.bottom(), a.width, a.bottom().saturating_sub(kb_area.bottom()));
+    let hits_before = app.hits.len();
+    let mut y = mapping_controls(f, app, a, kb_area.bottom() + 1);
+    if y >= a.bottom() {
+        f.render_widget(ratatui::widgets::Clear, below);
+        app.hits.truncate(hits_before);
+        y = mapping_controls(f, app, a, kb_area.bottom());
+    }
+    reset_and_apply(f, app, a, y);
+}
+
+/// Layer switch and action list. Returns the line for the Apply buttons.
+fn mapping_controls(f: &mut Frame, app: &mut App, a: Rect, y: u16) -> u16 {
+    // Layer switch and the selected key share one line to leave room for
+    // the action list.
+    let mut r = Row::new(a, y, &mut app.hits);
+    r.text(f, "Layer    ", LABEL).indent(9);
+    for (l, name) in [(Layer::Base, " Normal "), (Layer::Fn, " While Fn is held ")] {
+        r.button(f, name, if app.layer == l { BTN_ON } else { BTN }, Some(Hit::Layer(l))).gap(1);
+    }
+    r.gap(2);
     let Some(key) = app.map_key else {
-        f.render_widget(Paragraph::new(Span::styled("Click a key above to change it.", LABEL)), Rect::new(a.x, y, a.width, 1));
-        reset_and_apply(f, app, a, y + 2);
-        return;
+        r.text(f, "Click a key above to change it.", LABEL);
+        return r.y + 2;
     };
     let current = app.state.key(app.layer, key.id);
-    let layer_text = match app.layer {
-        Layer::Base => "normal layer",
-        Layer::Fn => "while Fn is held",
-    };
-    let line = Line::from(vec![
-        Span::styled("Selected ", LABEL),
-        Span::styled(format!("{} ", key.id), Style::new().add_modifier(Modifier::BOLD)),
-        Span::styled(format!("({layer_text})  now does: "), LABEL),
-        Span::styled(action_label(current), Style::new().fg(Color::Yellow)),
-    ]);
-    f.render_widget(Paragraph::new(line), Rect::new(a.x, y, a.width, 1));
-    y += 1;
+    r.text(f, &format!("{} ", key.id), Style::new().add_modifier(Modifier::BOLD));
     if key.id == "Fn" {
-        f.render_widget(Paragraph::new(Span::styled("The Fn key cannot be changed.", DIM)), Rect::new(a.x, y, a.width, 1));
-        reset_and_apply(f, app, a, y + 2);
-        return;
+        r.text(f, "cannot be changed.", DIM);
+        return r.y + 2;
     }
+    r.text(f, "now does: ", LABEL).text(f, &action_label(current), Style::new().fg(Color::Yellow));
+    let y = r.y + 1;
 
     let on = |cond: bool| if cond { BTN_ON } else { BTN };
     let mut r = Row::new(a, y, &mut app.hits);
@@ -293,14 +303,15 @@ fn key_mapping(f: &mut Frame, app: &mut App, body: Rect) {
         let act = KeyAction::Macro { slot: n - 1, mode: 0, count: 1 };
         r.button(f, &format!(" Macro {n} "), on(current == act), Some(Hit::SetAction(act))).gap(1);
     }
-    let y = r.y + 2;
-    reset_and_apply(f, app, a, y);
+    r.y + 1
 }
 
 fn reset_and_apply(f: &mut Frame, app: &mut App, a: Rect, y: u16) {
-    if y >= a.bottom() {
-        return;
-    }
+    // Never push the buttons off screen; in a very small window they take
+    // the last line.
+    let y = y.min(a.bottom().saturating_sub(1));
+    f.render_widget(Paragraph::new(""), Rect::new(a.x, y, a.width, 1));
+    app.hits.retain(|(r, _)| r.y != y);
     let unsent = [Layer::Base, Layer::Fn].iter().any(|l| app.state.entries(*l) != app.saved.entries(*l));
     let mut r = Row::new(a, y, &mut app.hits);
     r.button(f, "  Apply to keyboard  ", BTN_MAIN, Some(Hit::Apply)).gap(2);

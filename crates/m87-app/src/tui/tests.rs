@@ -120,6 +120,68 @@ fn settings_page() {
 }
 
 #[test]
+fn keyboard_shortcuts() {
+    let mut app = app();
+    // Lighting: Up/Down change the effect, Left/Right the brightness.
+    let effect = app.lighting.effect;
+    app.on_key(KeyCode::Down, KeyModifiers::NONE);
+    assert_ne!(app.lighting.effect, effect);
+    let b = app.lighting.brightness;
+    app.on_key(KeyCode::Left, KeyModifiers::NONE);
+    assert_eq!(app.lighting.brightness, b - 1);
+    // Key mapping: arrows walk the keyboard picture.
+    app.on_key(KeyCode::Char('3'), KeyModifiers::NONE);
+    assert!(render(&mut app, 100, 30).contains("Arrows select key"));
+    app.on_key(KeyCode::Right, KeyModifiers::NONE);
+    assert_eq!(app.map_key.unwrap().id, "Esc");
+    app.on_key(KeyCode::Right, KeyModifiers::NONE);
+    assert_eq!(app.map_key.unwrap().id, "F1");
+    app.on_key(KeyCode::Down, KeyModifiers::NONE);
+    app.on_key(KeyCode::Down, KeyModifiers::NONE);
+    app.on_key(KeyCode::Left, KeyModifiers::NONE);
+    app.on_key(KeyCode::Up, KeyModifiers::NONE);
+    assert!(app.map_key.is_some());
+    // Macros: Up/Down select.
+    app.on_key(KeyCode::Char('4'), KeyModifiers::NONE);
+    app.on_key(KeyCode::Down, KeyModifiers::NONE);
+    assert_eq!(app.macro_sel, 2);
+    // Device page does not advertise Enter.
+    app.on_key(KeyCode::Char('6'), KeyModifiers::NONE);
+    assert!(!render(&mut app, 100, 30).contains("Enter"));
+}
+
+#[test]
+fn same_keyboard_on_both_pages() {
+    for (w, h) in [(80, 24), (90, 26), (100, 30), (110, 30), (120, 30), (120, 40)] {
+        let mut app = app();
+        app.tab = Tab::KeyColors;
+        let colors = render(&mut app, w, h);
+        let color_line = colors.lines().position(|l| l.contains("Color ")).unwrap();
+        let paint: Vec<Rect> = app.hits.iter().filter(|(_, h)| matches!(h, Hit::PaintKey(_))).map(|(r, _)| *r).collect();
+        app.tab = Tab::Keys;
+        app.map_key = KEYS.iter().find(|k| k.id == "CapsLock");
+        let s = render(&mut app, w, h);
+        let map: Vec<Rect> = app.hits.iter().filter(|(_, h)| matches!(h, Hit::MapKey(_))).map(|(r, _)| *r).collect();
+        assert_eq!(paint, map, "{w}x{h}");
+        assert_eq!(paint.len(), KEYS.len(), "{w}x{h}");
+        // The whole action list and the Apply button still fit.
+        assert!(app.hits.iter().any(|(_, h)| *h == Hit::Apply), "{w}x{h}
+{s}");
+        assert!(s.contains("Macro    No macros yet"), "{w}x{h}
+{s}");
+        // Same blank line under the keyboard as on Key colors, when it fits.
+        if h >= 30 {
+            let layer_line = s.lines().position(|l| l.contains("Layer ")).unwrap();
+            assert_eq!(layer_line, color_line, "{w}x{h}
+{s}");
+        }
+        if (w, h) == (80, 24) || (w, h) == (110, 30) {
+            println!("{s}");
+        }
+    }
+}
+
+#[test]
 fn pages_fit_80_columns() {
     let mut app = app();
     for t in Tab::ALL {

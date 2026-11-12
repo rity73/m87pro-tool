@@ -139,11 +139,9 @@ const CHANGED: Rgb = Rgb::new(0xFF, 0xD3, 0x4D);
 const SELECTED: Rgb = Rgb::new(0x00, 0x78, 0xD4);
 const CHOOSING: Rgb = Rgb::new(0xCF, 0xE3, 0xFA);
 
-/// Key colors page: a dark case so the lit keys stand out.
-const CASE_DARK: Rgb = Rgb::new(0x24, 0x25, 0x2B);
-const CASE_DARK_EDGE: Rgb = Rgb::new(0x3A, 0x3C, 0x44);
-const CAP_OFF: Rgb = Rgb::new(0x3B, 0x3D, 0x45);
-const LABEL_OFF: Rgb = Rgb::new(0xB8, 0xBA, 0xC2);
+/// Key colors page: the same case; unlit keys are plain gray.
+const CAP_OFF: Rgb = Rgb::new(0xDD, 0xDF, 0xE5);
+const LABEL_OFF: Rgb = Rgb::new(0x86, 0x8A, 0x95);
 
 /// Top color and label color of one keycap.
 fn cap_colors(k: &Key, app: &App, mode: Mode, selected: Option<u8>) -> (Rgb, Rgb) {
@@ -187,9 +185,9 @@ unsafe fn round_rect(hdc: HDC, r: RECT, radius: i32, fill: Rgb, edge: Option<Rgb
 
 /// One keycap: a darker skirt with the lighter top face set back from it,
 /// more at the bottom than at the top, so the key looks raised.
-unsafe fn keycap(hdc: HDC, r: RECT, unit: f32, top: Rgb, dark_case: bool) {
-    let side = mix(top, BLACK, if dark_case { 0.35 } else { 0.18 });
-    let edge = mix(top, BLACK, if dark_case { 0.5 } else { 0.3 });
+unsafe fn keycap(hdc: HDC, r: RECT, unit: f32, top: Rgb) {
+    let side = mix(top, BLACK, 0.18);
+    let edge = mix(top, BLACK, 0.3);
     let radius = (unit * 0.1).max(2.0) as i32;
     round_rect(hdc, r, radius, side, Some(edge));
     let face = RECT {
@@ -260,15 +258,13 @@ pub unsafe fn paint(hdc: HDC, w: i32, h: i32, app: &App, mode: Mode, font: HFONT
     SetBkMode(hdc, TRANSPARENT);
     let old_brush = SelectObject(hdc, GetStockObject(DC_BRUSH));
 
-    let dark = mode == Mode::Colors;
-    let (case_fill, case_edge) = if dark { (CASE_DARK, CASE_DARK_EDGE) } else { (CASE_LIGHT, CASE_LIGHT_EDGE) };
-    round_rect(hdc, case, (unit * 0.3) as i32, case_fill, Some(case_edge));
+    round_rect(hdc, case, (unit * 0.3) as i32, CASE_LIGHT, Some(CASE_LIGHT_EDGE));
     light_bar(hdc, case, unit, mode);
 
     let selected = app.map_key.map(|k| k.index);
     for (k, r) in key_rects(w, h) {
         let (top, label) = cap_colors(k, app, mode, selected);
-        keycap(hdc, r, unit, top, dark);
+        keycap(hdc, r, unit, top);
         SetTextColor(hdc, colorref(label));
         // Centered on the top face, which sits above the lower edge.
         let mut tr = RECT { left: r.left + 1, top: r.top, right: r.right - 1, bottom: r.bottom - (unit * 0.11) as i32 };

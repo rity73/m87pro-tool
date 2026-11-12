@@ -477,23 +477,23 @@ impl Ui {
         self.label(L_UNSENT, Some(Lighting), None, [464, 568, 480, 20]);
 
         // 2 Key colors
-        self.add(C_VIEW, Some(KeyColors), w!("M87KeyboardView"), None, 0, 0, [24, 76, 932, 250], Font::Normal);
-        self.label(C_HELP, Some(KeyColors), Some(T::KeyColorsHelp), [24, 332, 932, 20]);
-        self.label(C_BRUSH_LBL, Some(KeyColors), Some(T::BrushColor), [24, 366, 110, 20]);
+        self.add(C_VIEW, Some(KeyColors), w!("M87KeyboardView"), None, 0, 0, [24, 76, 932, 272], Font::Normal);
+        self.label(C_HELP, Some(KeyColors), Some(T::KeyColorsHelp), [24, 354, 932, 20]);
+        self.label(C_BRUSH_LBL, Some(KeyColors), Some(T::BrushColor), [24, 388, 110, 20]);
         for i in 0..10 {
-            self.owner_button(C_PALETTE + i, KeyColors, Some(PALETTE[i as usize].0), [140 + i as i32 * 40, 356, 34, 34]);
+            self.owner_button(C_PALETTE + i, KeyColors, Some(PALETTE[i as usize].0), [140 + i as i32 * 40, 380, 34, 34]);
         }
-        self.owner_button(C_CUSTOM, KeyColors, None, [560, 358, 200, 30]);
-        self.button(C_PAINT_ALL, KeyColors, T::PaintAll, [140, 400, 170, 30]);
-        self.button(C_ALL_OFF, KeyColors, T::AllOff, [320, 400, 170, 30]);
-        self.label(C_LIT, Some(KeyColors), None, [504, 406, 300, 20]);
-        self.label(C_BRIGHT_LBL, Some(KeyColors), Some(T::Brightness), [24, 452, 110, 20]);
-        self.slider(C_BRIGHT, KeyColors, [136, 446, 300, 32], 0, MAX_LEVEL as isize);
-        self.label(C_BRIGHT_VAL, Some(KeyColors), None, [446, 452, 60, 20]);
-        self.label(C_NOTE, Some(KeyColors), Some(T::KeyColorsNote), [24, 494, 932, 20]);
-        self.label(C_LED, Some(KeyColors), Some(T::LedNote), [24, 516, 932, 40]);
-        self.button(C_APPLY, KeyColors, T::Apply, [24, 560, 200, 34]);
-        self.label(C_UNSENT, Some(KeyColors), None, [238, 568, 480, 20]);
+        self.owner_button(C_CUSTOM, KeyColors, None, [560, 382, 200, 30]);
+        self.button(C_PAINT_ALL, KeyColors, T::PaintAll, [140, 424, 170, 30]);
+        self.button(C_ALL_OFF, KeyColors, T::AllOff, [320, 424, 170, 30]);
+        self.label(C_LIT, Some(KeyColors), None, [504, 430, 300, 20]);
+        self.label(C_BRIGHT_LBL, Some(KeyColors), Some(T::Brightness), [24, 472, 110, 20]);
+        self.slider(C_BRIGHT, KeyColors, [136, 466, 300, 32], 0, MAX_LEVEL as isize);
+        self.label(C_BRIGHT_VAL, Some(KeyColors), None, [446, 472, 60, 20]);
+        self.label(C_NOTE, Some(KeyColors), Some(T::KeyColorsNote), [24, 506, 932, 20]);
+        self.label(C_LED, Some(KeyColors), Some(T::LedNote), [24, 526, 932, 36]);
+        self.button(C_APPLY, KeyColors, T::Apply, [24, 566, 200, 34]);
+        self.label(C_UNSENT, Some(KeyColors), None, [238, 574, 480, 20]);
 
         // 3 Key mapping
         self.label(K_LAYER_LBL, Some(Keys), Some(T::Layer), [24, 80, 80, 20]);

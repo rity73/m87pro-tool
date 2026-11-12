@@ -1,5 +1,9 @@
-//! Embed the application manifest (common controls 6, per-monitor DPI).
-//! No resource compiler is needed: the MSVC linker embeds the file.
+//! Embed the application manifest (common controls 6, per-monitor DPI) and
+//! the version resource. No resource compiler is needed: the MSVC linker
+//! embeds both.
+
+#[path = "../../tools/versioninfo.rs"]
+mod versioninfo;
 
 fn main() {
     let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -9,4 +13,5 @@ fn main() {
         println!("cargo:rustc-link-arg-bins=/MANIFEST:EMBED");
         println!("cargo:rustc-link-arg-bins=/MANIFESTINPUT:{}", manifest.display());
     }
+    versioninfo::embed("M87 Pro settings (window version)", "m87-gui.exe");
 }

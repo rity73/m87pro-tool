@@ -6,9 +6,14 @@ use m87_hid::{list_interfaces, Keyboard, Role};
 use m87_proto::layout::{self, KEYS};
 use m87_proto::lighting::{Effect, Lighting, Rgb, MAX_LEVEL};
 use m87_proto::plan::{self, Kind, Packet};
+use m87_proto::keymap::{KeyAction, Layer, MEDIA, Mouse};
+use m87_proto::settings::SLEEP_CHOICES;
 use m87_proto::{hex, Link};
 
+mod state;
 mod tui;
+
+use state::State;
 
 #[derive(Parser)]
 #[command(name = "m87", version, about = "Configure the M87 Pro keyboard. Run without a command to open the full-screen interface.")]
@@ -31,12 +36,79 @@ enum Command {
     Battery,
     /// List the lighting effects and the settings each one uses.
     Effects,
-    /// List key names for use with `key-colors --key`.
+    /// List key names (for key-colors and remap).
     Keys,
     /// Turn on a lighting effect.
     Light(LightArgs),
     /// Give each key its own fixed color.
     KeyColors(KeyColorArgs),
+    /// Change what a key does.
+    Remap(RemapArgs),
+    /// Show the key changes saved on this PC.
+    KeyMap,
+    /// Return every key on both layers to its factory function.
+    ResetKeys(SendOnly),
+    /// Show or change keyboard settings (Windows key lock, sleep timer, ...).
+    Settings(SettingsArgs),
+    /// List the actions a key can be given.
+    Actions,
+}
+
+#[derive(Args)]
+struct SendOnly {
+    #[command(flatten)]
+    send: SendOpts,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum LayerArg {
+    /// Normal typing.
+    Base,
+    /// While Fn is held down.
+    Fn,
+}
+
+#[derive(Args)]
+struct RemapArgs {
+    /// Key to change (see `m87 keys`), for example CapsLock.
+    key: String,
+    /// New action (see `m87 actions`), for example key:Ctrl, media:mute, disabled, default.
+    action: String,
+    /// Layer to change.
+    #[arg(short, long, value_enum, default_value_t = LayerArg::Base)]
+    layer: LayerArg,
+    #[command(flatten)]
+    send: SendOpts,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum OnOff {
+    On,
+    Off,
+}
+
+#[derive(Args)]
+struct SettingsArgs {
+    /// Block the Windows key.
+    #[arg(long, value_enum)]
+    block_win: Option<OnOff>,
+    /// Block Alt+Tab.
+    #[arg(long, value_enum)]
+    block_alt_tab: Option<OnOff>,
+    /// Block Alt+F4.
+    #[arg(long, value_enum)]
+    block_alt_f4: Option<OnOff>,
+    /// Turn the keyboard off after no use for: never, 1min, 5min, 30min.
+    #[arg(long, value_parser = ["never", "1min", "5min", "30min"])]
+    sleep: Option<String>,
+    /// Key response time level, 1 (fastest) to 5 (most protection against double presses).
+    #[arg(long, value_parser = clap::value_parser!(u8).range(1..=5))]
+    response: Option<u8>,
+    /// Raw Fn switch value (meaning not yet confirmed).
+    #[arg(long)]
+    fn_switch: Option<u8>,
+    #[command(flatten)]
+    send: SendOpts,
 }
 
 #[derive(Args)]
@@ -222,6 +294,11 @@ fn run(cli: Cli) -> Result<()> {
                 println!("{}", names.join(" "));
             }
         }
+        c @ (Command::Remap(_)
+        | Command::KeyMap
+        | Command::ResetKeys(_)
+        | Command::Settings(_)
+        | Command::Actions) => return run_m3(c, cli.verbose),
         Command::Light(a) => {
             let effect = Effect::from_name(&a.effect)
                 .with_context(|| format!("unknown effect \"{}\". Run `m87 effects` to see the list", a.effect))?;
@@ -265,6 +342,109 @@ fn run(cli: Cli) -> Result<()> {
                 println!("Applied: per-key colors ({lit} of {} keys lit)", KEYS.len());
             }
         }
+    }
+    Ok(())
+}
+
+fn print_settings(st: &State) {
+    let s = &st.settings;
+    let onoff = |b: bool| if b { "on" } else { "off" };
+    let sleep = SLEEP_CHOICES.iter().find(|(_, v)| *v == s.sleep).map(|(n, _)| *n).unwrap_or("unknown");
+    println!("Block Windows key   {}", onoff(s.disable_win));
+    println!("Block Alt+Tab       {}", onoff(s.disable_alt_tab));
+    println!("Block Alt+F4        {}", onoff(s.disable_alt_f4));
+    println!("Sleep after         {sleep}");
+    println!("Response level      {}", s.response);
+    println!("Fn switch (raw)     {}", s.fn_switch);
+    println!("(Saved in {})", state::path().display());
+}
+
+fn run_m3(command: Command, verbose: bool) -> Result<()> {
+    match command {
+        Command::Actions => {
+            println!("default                 the key's normal function");
+            println!("disabled                the key does nothing");
+            println!("key:<KEYS>              send keys, e.g. key:A, key:Ctrl+C, key:Ctrl+Shift+Esc, key:LShift, key:F13");
+            println!("mouse:<FUNCTION>        {}", Mouse::ALL.iter().map(|m| m.name()).collect::<Vec<_>>().join(", "));
+            println!("media:<FUNCTION>        {}", MEDIA.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", "));
+            println!("Modifiers for key:      Ctrl, Shift, Alt, Win (left side); RCtrl, RShift, RAlt, RWin");
+        }
+        Command::KeyMap => {
+            let st = State::load()?;
+            if st.keys.is_empty() {
+                println!("No key changes saved. Every key does its normal function.");
+            }
+            for ((layer, id), action) in &st.keys {
+                let l = if *layer == 0 { "base" } else { "fn  " };
+                println!("{l}  {id:<12} {}", action.to_text());
+            }
+        }
+        Command::Remap(a) => {
+            let key = layout::find(&a.key).with_context(|| format!("unknown key \"{}\". Run `m87 keys` to see the names", a.key))?;
+            if key.id == "Fn" {
+                bail!("the Fn key cannot be changed");
+            }
+            let action = KeyAction::parse(&a.action).map_err(|e| anyhow::anyhow!(e))?;
+            let layer = match a.layer {
+                LayerArg::Base => Layer::Base,
+                LayerArg::Fn => Layer::Fn,
+            };
+            let mut st = State::load()?;
+            st.set_key(layer, key.id, action);
+            let entries = st.entries(layer);
+            if send(&a.send, verbose, |link| plan::set_key_map(link, layer, &entries))? {
+                st.save()?;
+                println!("Applied: {} key {} now does {}", layer.name(), key.id, action.to_text());
+            }
+        }
+        Command::ResetKeys(a) => {
+            if send(&a.send, verbose, plan::reset_key_maps)? {
+                let mut st = State::load()?;
+                st.clear_keys();
+                st.save()?;
+                println!("Applied: every key does its normal function again.");
+            }
+        }
+        Command::Settings(a) => {
+            let mut st = State::load()?;
+            let changed = a.block_win.is_some()
+                || a.block_alt_tab.is_some()
+                || a.block_alt_f4.is_some()
+                || a.sleep.is_some()
+                || a.response.is_some()
+                || a.fn_switch.is_some();
+            if !changed {
+                print_settings(&st);
+                return Ok(());
+            }
+            let on = |v: OnOff| matches!(v, OnOff::On);
+            let s = &mut st.settings;
+            if let Some(v) = a.block_win {
+                s.disable_win = on(v);
+            }
+            if let Some(v) = a.block_alt_tab {
+                s.disable_alt_tab = on(v);
+            }
+            if let Some(v) = a.block_alt_f4 {
+                s.disable_alt_f4 = on(v);
+            }
+            if let Some(v) = &a.sleep {
+                s.sleep = SLEEP_CHOICES.iter().find(|(n, _)| n == v).map(|(_, x)| *x).unwrap_or(2);
+            }
+            if let Some(v) = a.response {
+                s.response = v;
+            }
+            if let Some(v) = a.fn_switch {
+                s.fn_switch = v;
+            }
+            let settings = st.settings;
+            if send(&a.send, verbose, |link| plan::set_settings(link, &settings))? {
+                st.save()?;
+                println!("Applied.");
+                print_settings(&st);
+            }
+        }
+        _ => unreachable!(),
     }
     Ok(())
 }

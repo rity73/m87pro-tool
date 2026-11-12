@@ -179,10 +179,28 @@ impl Keyboard {
     /// Receiver only: send one 33-byte report and wait for its
     /// acknowledgement. Returns the reply without the report ID
     /// (CMD, LEN, IDX, data…).
+    /// The 2.4 GHz link sometimes drops a packet or its reply, so a packet
+    /// without a reply is sent again (up to 3 times in total). Every packet
+    /// in this protocol is safe to repeat.
     pub fn dongle_transact(&self, report: &[u8; dongle::REPORT_LEN]) -> Result<Vec<u8>> {
         if self.link != Link::Dongle {
             return Err(Error::Unsupported(self.link.label()));
         }
+        let mut last = Error::NoResponse(report[1]);
+        for attempt in 0..3 {
+            if attempt > 0 {
+                self.trace("-- no reply, sending again", &[]);
+                sleep(Duration::from_millis(20));
+            }
+            match self.dongle_once(report) {
+                Err(e @ Error::NoResponse(_)) => last = e,
+                other => return other,
+            }
+        }
+        Err(last)
+    }
+
+    fn dongle_once(&self, report: &[u8; dongle::REPORT_LEN]) -> Result<Vec<u8>> {
         self.drain()?;
         self.trace(">>", report);
         if self.dev.write(report).is_err() {

@@ -3,7 +3,9 @@
 //! The transport layer just executes a `Vec<Packet>`, and the CLI can print
 //! the same list for `--dry-run`.
 
+use crate::keymap::{self, KeyAction, Layer};
 use crate::lighting::{color_table, effect_block, per_key_block, Lighting, Rgb, COLOR_TABLE_LEN};
+use crate::settings::{self, Settings};
 use crate::{dongle, wired, Link};
 
 /// How one packet is sent.
@@ -85,10 +87,105 @@ pub fn set_key_colors(link: Link, brightness: u8, colors: &[(u8, Rgb)]) -> Vec<P
     }
 }
 
+/// Upload the whole key map of one layer. Slots not listed keep their
+/// factory function. (The original app also writes whole tables.)
+pub fn set_key_map(link: Link, layer: Layer, entries: &[(u8, KeyAction)]) -> Vec<Packet> {
+    let t = keymap::table(entries);
+    match link {
+        Link::Dongle => {
+            let cmd = match layer {
+                Layer::Base => dongle::cmd::KEYMAP_BASE,
+                Layer::Fn => dongle::cmd::KEYMAP_FN,
+            };
+            t.chunks(dongle::MAX_PAYLOAD)
+                .enumerate()
+                .map(|(i, c)| Packet::dongle(dongle::frame(cmd, c.len() as u8, i as u8, c).unwrap(), 2))
+                .collect()
+        }
+        Link::Wired => {
+            let cc = match layer {
+                Layer::Base => wired::cc::KEYMAP_BASE,
+                Layer::Fn => wired::cc::KEYMAP_FN,
+            };
+            let mut out = vec![
+                Packet::feature(wired::begin(), true),
+                Packet::feature(wired::control(cc, (keymap::TABLE_LEN / wired::DATA_LEN) as u8), true),
+            ];
+            out.extend(wired::data_packets(&t).into_iter().map(|p| Packet::feature(p, false)));
+            out.push(Packet::feature(wired::apply(), true));
+            out.push(Packet::feature(wired::control(wired::cc::FINISH, 0), false));
+            out
+        }
+    }
+}
+
+/// Return every key on both layers to its factory function.
+pub fn reset_key_maps(link: Link) -> Vec<Packet> {
+    match link {
+        Link::Dongle => vec![Packet::dongle(dongle::frame(dongle::cmd::RESET_KEYS, 0, 0, &[]).unwrap(), 100)],
+        Link::Wired => {
+            let mut out = set_key_map(link, Layer::Base, &[]);
+            out.extend(set_key_map(link, Layer::Fn, &[]));
+            out
+        }
+    }
+}
+
+/// Write the system settings block.
+pub fn set_settings(link: Link, s: &Settings) -> Vec<Packet> {
+    match link {
+        Link::Dongle => {
+            vec![Packet::dongle(dongle::frame(dongle::cmd::SETTINGS, 0x10, 0, &settings::dongle_block(s)).unwrap(), 0)]
+        }
+        Link::Wired => {
+            // Header `04 17 01 … 01`: data[2] = 1 as in the original app.
+            let mut head = wired::control(wired::cc::SETTINGS, 1);
+            head[3] = 0x01;
+            vec![
+                Packet::feature(wired::begin(), true),
+                Packet::feature(head, true),
+                Packet::feature(wired::data_packets(&settings::wired_block(s))[0], false),
+                Packet::feature(wired::apply(), true),
+            ]
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::lighting::Effect;
+
+    #[test]
+    fn dongle_key_map() {
+        let p = set_key_map(Link::Dongle, Layer::Fn, &[(1, KeyAction::Disabled)]);
+        assert_eq!(p.len(), 21);
+        assert_eq!(&p[0].bytes[..12], &[0, 0x12, 0x1C, 0, 0, 0, 0, 0, 5, 3, 0, 0]);
+        assert_eq!(&p[20].bytes[..4], &[0, 0x12, 0x10, 20]);
+        assert_eq!(&p[20].bytes[18..20], &[0xAA, 0x55]);
+    }
+
+    #[test]
+    fn wired_key_map() {
+        let p = set_key_map(Link::Wired, Layer::Base, &[]);
+        assert_eq!(p.len(), 2 + 9 + 2);
+        assert_eq!((p[1].bytes[2], p[1].bytes[9]), (0x11, 9));
+        assert_eq!(&p[10].bytes[63..65], &[0xAA, 0x55]);
+        let r = reset_key_maps(Link::Wired);
+        assert_eq!(r[14].bytes[2], 0x27);
+        assert_eq!(&reset_key_maps(Link::Dongle)[0].bytes[..4], &[0, 0x1F, 0, 0]);
+    }
+
+    #[test]
+    fn settings_plans() {
+        let s = Settings::default();
+        let d = set_settings(Link::Dongle, &s);
+        assert_eq!(&d[0].bytes[..13], &[0, 0x07, 0x10, 0, 0, 1, 0, 0, 0, 0, 2, 0, 2]);
+        let w = set_settings(Link::Wired, &s);
+        assert_eq!(&w[1].bytes[..10], &[0, 0x04, 0x17, 0x01, 0, 0, 0, 0, 0, 1]);
+        assert_eq!(&w[2].bytes[63..65], &[0xAA, 0x55]);
+        assert_eq!(w.len(), 4);
+    }
 
     #[test]
     fn dongle_effect_matches_original() {

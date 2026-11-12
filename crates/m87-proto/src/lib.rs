@@ -4,9 +4,11 @@
 //! rule here can be unit-tested without a keyboard. See `docs/protocol.md`.
 
 pub mod dongle;
+pub mod keymap;
 pub mod layout;
 pub mod lighting;
 pub mod plan;
+pub mod settings;
 pub mod wired;
 
 /// SONiX (Microdia) vendor ID used by the keyboard and the dongle.

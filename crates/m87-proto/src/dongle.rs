@@ -24,8 +24,18 @@ pub mod cmd {
     pub const PING: u8 = 0x02;
     /// Lighting block (effect, or switch to per-key colors).
     pub const LIGHTING: u8 = 0x05;
+    /// System settings block.
+    pub const SETTINGS: u8 = 0x07;
+    /// Factory reset of all keyboard data.
+    pub const FACTORY_RESET: u8 = 0x0F;
+    /// One 28-byte slice of the base-layer key map.
+    pub const KEYMAP_BASE: u8 = 0x10;
+    /// One 28-byte slice of the Fn-layer key map.
+    pub const KEYMAP_FN: u8 = 0x12;
     /// One 28-byte slice of the per-key color table.
     pub const KEY_COLORS: u8 = 0x14;
+    /// Return all keys to their factory functions.
+    pub const RESET_KEYS: u8 = 0x1F;
     /// Read the battery level.
     pub const BATTERY: u8 = 0x20;
 }

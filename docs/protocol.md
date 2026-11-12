@@ -243,7 +243,7 @@ Built by FUN_00416560 / FUN_004161b0 from `t_key_macro_data(macro_type, macro_va
 | 1 | `05 03 00 00` | special function 3 (likely **disable key**) [I] |
 | 2 | `02 MOD KEY 00` | keyboard: MOD = HID modifier bitmask (value2), KEY = HID usage (value). If MOD=0 and KEY is E0..E7, encoded as `02 <bit> 00 00` (LCtrl=01 … RGui=80) [O] |
 | 3 | `06 IDX MODE CNT` | macro: IDX = position of the macro in `t_macro_data` (upload order), MODE = value2, CNT = value3 (repeat mode/count [I]) [O] |
-| 5 | `01 BTN 00 00` / `01 03 FF 00` | mouse: v1 → `01 01` left, v2 → `01 04` middle, v3 → `01 02` right, v4 → `01 03` (L+R? [U]), v7 → `01 08` back, v8 → `01 10` forward; v5 → `03 01 …`, v6 → `03 FF …` (**wheel up/down** [I]) [O] |
+| 5 | `01 01 BTN 00` / `01 03 DIR 00` | mouse (corrected from FUN_004161b0, M3): button mask BTN v1 → 01 left, v2 → 04 middle, v3 → 02 right, v4 → 03 (L+R? [U]), v7 → 08 back, v8 → 10 forward; wheel v5 → `01 03 01` up, v6 → `01 03 FF` down [O] |
 | 6 | `03 LO 00 00` | consumer usage: v1 0xCD play/pause, v2 0xB7 stop, v3 0xB6 prev, v4 0xB5 next, v5 0xE9 vol+, v6 0xEA vol-, v7 0xE2 mute [O] |
 | 12 | `03 LO HI 00` | consumer usage 16-bit via FUN_00417440: 500→0x0194 My Computer, 501→0x0192 Calculator, 502→0x018A Mail, 503→0x0183 Media player, 504-510→0x00CD,B7,B6,B5,E9,EA,E2, 511→0x0223 WWW home, 512→0x0227 refresh, 513→0x0226 stop, 514→0x0224 back, 515→0x0225 forward, 516→0x022A favourites, 517→0x0221 search [O] |
 | 7 | `02 MOD KEY 00` shortcuts | v1 Win+D (`02 08 07`), v2 Win+E (`08 08`), v3 Win+L (`08 0F`), v4 Ctrl+W (`01 1A`), v5 Alt+Tab (`04 2B`), v6 Ctrl+C (`01 06`), v7 Ctrl+V (`01 19`), v8 Ctrl+X (`01 1B`); v10 → `02 02 00 00` (LShift), v11 → `02 01 00 00` (LCtrl) [O] |
@@ -367,3 +367,15 @@ Battery (CMD 0x20): `<< 00 20 01 00 5C …` → 0x5C = **92 %** [O] (byte 3 of t
 - The wired settings port is **MI_02, usage FF13:0001** (65-byte feature reports), not MI_00 as
   `config.xml` states. Wired interfaces seen: MI_00 boot keyboard; MI_01 collections 0001:0002,
   0001:0006, 0001:0080, 000C:0001, FFFF:0001 (events); MI_02 FF13:0001 (settings) [O].
+
+### 9.2 Key map and settings — first live session (2.4 GHz receiver, M3)
+
+- `00 1F` (reset keys): acknowledged; keys work normally afterwards and **lighting is unchanged** [O],
+  so 0x1F resets the key maps only.
+- Fn-layer key map (CMD 0x12, 21 packets) with `fn.Pause = 03 E2 00 00` (mute): Fn+Pause mutes,
+  Pause alone unchanged [O]. Writing the table again with all zeros restores the default [O].
+- The ack reply for key-map slices echoes CMD/LEN/IDX but returns zero payload [O].
+- **Replies are sometimes lost on the 2.4 GHz link** (packet 0x11 of 21 had no reply). Re-sending
+  the same packet succeeds; `m87` retries up to 3 times [O].
+- Settings (CMD 0x07) `00 01 00 00 01 00 02 00 02` + `AA 55`: Windows key blocked; sending
+  `… 00 …` again unblocks it [O].

@@ -1,0 +1,111 @@
+# Build both programs from the tagged source and publish them as a GitHub Release.
+#
+# Trigger: push a tag such as v0.1.0 (it must match the version in Cargo.toml).
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable, MSVC)
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc
+          rustup default stable
+          rustc --version
+
+      - name: Check that the tag matches the crate version
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"$').Matches[0].Groups[1].Value
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "Tag ${{ github.ref_name }} does not match Cargo.toml version $version"
+          }
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Build (release)
+        run: cargo build --workspace --release --locked --target x86_64-pc-windows-msvc
+
+      - name: Collect files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/m87.exe dist/
+          Copy-Item target/x86_64-pc-windows-msvc/release/m87-gui.exe dist/
+
+      - name: Upload unsigned files
+        id: upload-unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned
+          path: dist/
+          if-no-files-found: error
+
+      # ------------------------------------------------------------------
+      # SIGNPATH SIGNING STEP — add after the SignPath Foundation approval.
+      #
+      # 1. In the SignPath project, register this repository as a trusted
+      #    build system and create an artifact configuration that signs
+      #    m87.exe and m87-gui.exe inside the uploaded zip.
+      # 2. Add the repository secret SIGNPATH_API_TOKEN.
+      # 3. Uncomment the step below and fill in the IDs and slugs.
+      # 4. Change "Collect files" in the release job to use dist-signed/.
+      #
+      # - name: Sign with SignPath
+      #   uses: signpath/github-action-submit-signing-request@v1
+      #   with:
+      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #     organization-id: "<organization id>"
+      #     project-slug: "m87pro-tool"
+      #     signing-policy-slug: "release-signing"
+      #     artifact-configuration-slug: "initial"
+      #     github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+      #     wait-for-completion: true
+      #     output-artifact-directory: dist-signed
+      #
+      # - name: Upload signed files
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: signed
+      #     path: dist-signed/
+      #     if-no-files-found: error
+      # ------------------------------------------------------------------
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download files
+        uses: actions/download-artifact@v4
+        with:
+          # Change to "signed" once the SignPath step is enabled.
+          name: unsigned
+          path: dist
+
+      - name: Write checksums
+        working-directory: dist
+        run: sha256sum m87.exe m87-gui.exe > SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            dist/m87.exe dist/m87-gui.exe dist/SHA256SUMS.txt

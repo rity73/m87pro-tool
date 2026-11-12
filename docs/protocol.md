@@ -379,3 +379,10 @@ Battery (CMD 0x20): `<< 00 20 01 00 5C …` → 0x5C = **92 %** [O] (byte 3 of t
   the same packet succeeds; `m87` retries up to 3 times [O].
 - Settings (CMD 0x07) `00 01 00 00 01 00 02 00 02` + `AA 55`: Windows key blocked; sending
   `… 00 …` again unblocks it [O].
+
+### 9.3 Macros — first live session (2.4 GHz receiver, M3)
+
+- Macro storage via CMD 0x09 (17 packets for one macro "tap H, tap I"; last LEN = remainder 0x14) acknowledged [O].
+- Key action `06 00 00 01` (macro slot 0, MODE 0, CNT 1) on Fn+Pause types "hi" **once** [O].
+  Other MODE values (repeat / hold / toggle) not tested yet [U].
+- Deleting the macro uploads a directory with no entries (all macros gone) [O].

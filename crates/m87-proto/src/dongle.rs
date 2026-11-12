@@ -26,6 +26,8 @@ pub mod cmd {
     pub const LIGHTING: u8 = 0x05;
     /// System settings block.
     pub const SETTINGS: u8 = 0x07;
+    /// One 28-byte slice of the macro storage.
+    pub const MACROS: u8 = 0x09;
     /// Factory reset of all keyboard data.
     pub const FACTORY_RESET: u8 = 0x0F;
     /// One 28-byte slice of the base-layer key map.

@@ -151,10 +151,69 @@ pub fn set_settings(link: Link, s: &Settings) -> Vec<Packet> {
     }
 }
 
+/// Upload the macro storage buffer from `macros::storage`.
+/// Sizes, trailer position and the odd last-packet LEN follow the
+/// original app exactly.
+pub fn set_macros(link: Link, storage: &[u8]) -> Vec<Packet> {
+    let len = storage.len();
+    match link {
+        Link::Dongle => {
+            let q = len / dongle::MAX_PAYLOAD;
+            let n = q + 1 + usize::from(len % dongle::MAX_PAYLOAD != 0);
+            let mut buf = storage.to_vec();
+            buf.resize(n * dongle::MAX_PAYLOAD, 0);
+            buf[n * dongle::MAX_PAYLOAD - 2..].copy_from_slice(&crate::BLOCK_TRAILER);
+            buf.chunks(dongle::MAX_PAYLOAD)
+                .enumerate()
+                .map(|(i, c)| {
+                    let l = if i == n - 1 { (len - q * dongle::MAX_PAYLOAD) as u8 } else { dongle::MAX_PAYLOAD as u8 };
+                    Packet::dongle(dongle::frame(dongle::cmd::MACROS, l, i as u8, c).unwrap(), 2)
+                })
+                .collect()
+        }
+        Link::Wired => {
+            let n = len / wired::DATA_LEN + if len % wired::DATA_LEN == 0 { 1 } else { 2 };
+            let mut buf = storage.to_vec();
+            buf.resize(n * wired::DATA_LEN, 0);
+            buf[n * wired::DATA_LEN - 2..].copy_from_slice(&crate::BLOCK_TRAILER);
+            let mut out = vec![
+                Packet::feature(wired::control(wired::cc::BEGIN_MACRO, 0), true),
+                Packet { pause_ms: 30, ..Packet::feature(wired::control(wired::cc::MACROS, n as u8), true) },
+            ];
+            let mut data: Vec<Packet> = wired::data_packets(&buf).into_iter().map(|p| Packet::feature(p, false)).collect();
+            if let Some(last) = data.last_mut() {
+                last.pause_ms = 30;
+            }
+            out.extend(data);
+            out.push(Packet::feature(wired::apply(), true));
+            out
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::lighting::Effect;
+
+    #[test]
+    fn macro_upload_sizes() {
+        use crate::macros::{storage, Macro};
+        let buf = storage(&[Some(Macro::parse("tap:A").unwrap())]).unwrap();
+        assert_eq!(buf.len(), 0x1A8); // 424 bytes
+        let w = set_macros(Link::Wired, &buf);
+        // 424/64 = 6 rem 40 -> 8 packets
+        assert_eq!(w[1].bytes[9], 8);
+        assert_eq!(w.len(), 2 + 8 + 1);
+        assert_eq!(&w[9].bytes[63..65], &[0xAA, 0x55]);
+        assert_eq!(w[0].bytes[2], 0x19);
+        let d = set_macros(Link::Dongle, &buf);
+        // 424/28 = 15 rem 4 -> 17 packets, last LEN = 4
+        assert_eq!(d.len(), 17);
+        assert_eq!(&d[16].bytes[..4], &[0, 0x09, 4, 16]);
+        assert_eq!(&d[15].bytes[..4], &[0, 0x09, 0x1C, 15]);
+        assert_eq!(&d[16].bytes[30..32], &[0xAA, 0x55]);
+    }
 
     #[test]
     fn dongle_key_map() {

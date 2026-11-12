@@ -7,6 +7,7 @@ pub mod dongle;
 pub mod keymap;
 pub mod layout;
 pub mod lighting;
+pub mod macros;
 pub mod plan;
 pub mod settings;
 pub mod wired;

@@ -52,6 +52,36 @@ enum Command {
     Settings(SettingsArgs),
     /// List the actions a key can be given.
     Actions,
+    /// Create, list or delete macros (key sequences played by the keyboard).
+    #[command(subcommand)]
+    Macro(MacroCmd),
+}
+
+#[derive(Subcommand)]
+enum MacroCmd {
+    /// Show the saved macros.
+    List,
+    /// Create or replace a macro and send all macros to the keyboard.
+    ///
+    /// STEPS is a comma-separated list: tap:A, down:LShift, up:LShift,
+    /// click:left, mouse-down:right, mouse-up:right, wait:200 (milliseconds).
+    /// Example: m87 macro set 1 "tap:H, tap:I, wait:100, tap:Enter"
+    Set {
+        /// Macro number, 1 to 100.
+        #[arg(value_parser = clap::value_parser!(u8).range(1..=100))]
+        number: u8,
+        /// Steps, in quotes.
+        steps: String,
+        #[command(flatten)]
+        send: SendOpts,
+    },
+    /// Delete a macro and send the remaining macros to the keyboard.
+    Delete {
+        #[arg(value_parser = clap::value_parser!(u8).range(1..=100))]
+        number: u8,
+        #[command(flatten)]
+        send: SendOpts,
+    },
 }
 
 #[derive(Args)]
@@ -298,7 +328,8 @@ fn run(cli: Cli) -> Result<()> {
         | Command::KeyMap
         | Command::ResetKeys(_)
         | Command::Settings(_)
-        | Command::Actions) => return run_m3(c, cli.verbose),
+        | Command::Actions
+        | Command::Macro(_)) => return run_m3(c, cli.verbose),
         Command::Light(a) => {
             let effect = Effect::from_name(&a.effect)
                 .with_context(|| format!("unknown effect \"{}\". Run `m87 effects` to see the list", a.effect))?;
@@ -442,6 +473,45 @@ fn run_m3(command: Command, verbose: bool) -> Result<()> {
                 st.save()?;
                 println!("Applied.");
                 print_settings(&st);
+            }
+        }
+        Command::Macro(MacroCmd::List) => {
+            let st = State::load()?;
+            if st.macros.is_empty() {
+                println!("No macros saved. Create one with: m87 macro set 1 \"tap:H, tap:I\"");
+            }
+            for (n, m) in &st.macros {
+                println!("{n:>3}  {}", m.to_text());
+            }
+        }
+        Command::Macro(MacroCmd::Set { number, steps, send: opts }) => {
+            let m = m87_proto::macros::Macro::parse(&steps).map_err(|e| anyhow::anyhow!(e))?;
+            let mut st = State::load()?;
+            st.macros.insert(number, m);
+            let buf = st.macro_storage().map_err(|e| anyhow::anyhow!(e))?;
+            if send(&opts, verbose, |link| plan::set_macros(link, &buf))? {
+                st.save()?;
+                println!("Applied: macro {number} saved in the keyboard. Assign it with: m87 remap <KEY> macro:{number}");
+            }
+        }
+        Command::Macro(MacroCmd::Delete { number, send: opts }) => {
+            let mut st = State::load()?;
+            if st.macros.remove(&number).is_none() {
+                bail!("there is no macro {number}");
+            }
+            let buf = st.macro_storage().map_err(|e| anyhow::anyhow!(e))?;
+            if send(&opts, verbose, |link| plan::set_macros(link, &buf))? {
+                st.save()?;
+                println!("Applied: macro {number} deleted.");
+                let users: Vec<String> = st
+                    .keys
+                    .iter()
+                    .filter(|(_, a)| matches!(a, KeyAction::Macro { slot, .. } if *slot + 1 == number))
+                    .map(|((l, id), _)| format!("{}.{id}", if *l == 0 { "base" } else { "fn" }))
+                    .collect();
+                if !users.is_empty() {
+                    println!("Note: these keys still point to macro {number}: {}. Give them a new action with m87 remap.", users.join(", "));
+                }
             }
         }
         _ => unreachable!(),

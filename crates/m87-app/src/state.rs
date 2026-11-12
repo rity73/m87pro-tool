@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use m87_proto::keymap::{KeyAction, Layer};
 use m87_proto::layout::{self, KEYS};
+use m87_proto::macros::{self, Macro};
 use m87_proto::settings::Settings;
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -23,6 +24,8 @@ pub struct State {
     pub settings: Settings,
     /// Non-default key actions, by (layer, key id).
     pub keys: BTreeMap<(u8, &'static str), KeyAction>,
+    /// Macros by number (1..=100).
+    pub macros: BTreeMap<u8, Macro>,
 }
 
 fn layer_code(l: Layer) -> u8 {
@@ -83,6 +86,11 @@ impl State {
                 "settings.fn-switch" => s.fn_switch = value.parse().ok().with_context(bad)?,
                 "settings.sleep" => s.sleep = value.parse().ok().with_context(bad)?,
                 "settings.response" => s.response = value.parse().ok().with_context(bad)?,
+                _ if name.starts_with("macro.") => {
+                    let n: u8 = name[6..].parse().ok().filter(|n| (1..=100).contains(n)).with_context(|| format!("line {}: macro number must be 1-100", n + 1))?;
+                    let m = Macro::parse(value).map_err(|e| anyhow::anyhow!("line {}: {e}", n + 1))?;
+                    st.macros.insert(n, m);
+                }
                 _ => {
                     let (layer, key) = name.split_once('.').with_context(|| format!("line {}: unknown name {name}", n + 1))?;
                     let layer = match layer {
@@ -112,6 +120,10 @@ impl State {
         out += &format!("settings.fn-switch = {}\n", s.fn_switch);
         out += &format!("settings.sleep = {}\n", s.sleep);
         out += &format!("settings.response = {}\n", s.response);
+        for (n, m) in &self.macros {
+            out += &format!("macro.{n} = {}
+", m.to_text());
+        }
         for ((layer, id), action) in &self.keys {
             let l = if *layer == 0 { "base" } else { "fn" };
             out += &format!("{l}.{id} = {}\n", action.to_text());
@@ -144,6 +156,13 @@ impl State {
             .collect()
     }
 
+    /// Macro storage buffer for upload (slot i = macro number i+1).
+    pub fn macro_storage(&self) -> std::result::Result<Vec<u8>, String> {
+        let top = self.macros.keys().max().copied().unwrap_or(0) as usize;
+        let list: Vec<Option<Macro>> = (1..=top).map(|n| self.macros.get(&(n as u8)).cloned()).collect();
+        macros::storage(&list)
+    }
+
     pub fn clear_keys(&mut self) {
         self.keys.clear();
     }
@@ -160,6 +179,7 @@ mod tests {
         st.settings.sleep = 3;
         st.set_key(Layer::Base, "CapsLock", KeyAction::parse("key:LCtrl").unwrap());
         st.set_key(Layer::Fn, "Pause", KeyAction::parse("media:mute").unwrap());
+        st.macros.insert(2, Macro::parse("tap:H, tap:I").unwrap());
         let text = st.to_text();
         assert!(text.contains("fn.Pause = media:mute"));
         assert_eq!(State::parse(&text).unwrap(), st);

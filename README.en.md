@@ -98,23 +98,25 @@ Workspace layout:
 
 ## Code signing policy
 
-Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by
-[SignPath Foundation](https://signpath.org/).
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)
 
 Only the release files built by this repository's GitHub Actions workflow from the tagged
 source code are signed. Files built anywhere else are never signed with this certificate.
 
 Team roles:
 
-- Committers and reviewers: [rity73](https://github.com/rity73)
+- Authors (committers): [rity73](https://github.com/rity73)
+- Reviewers: [rity73](https://github.com/rity73)
 - Approvers: [rity73](https://github.com/rity73)
 
 Every signing request is approved manually by an approver.
 
 ### Privacy statement
 
-This program will not transfer any information to other networked systems. It talks only to
-the keyboard over USB, and it stores its settings and profiles only on your PC.
+This program will not transfer any information to other networked systems unless specifically
+requested by the user or the person installing or operating it.
+
+It talks only to the keyboard over USB, and it stores its settings and profiles only on your PC.
 
 ## License
 

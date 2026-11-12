@@ -97,8 +97,7 @@ cargo test --workspace
 
 ## 코드 서명 정책 (Code signing policy)
 
-Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by
-[SignPath Foundation](https://signpath.org/).
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)
 (SignPath.io가 무료 코드 서명을, SignPath Foundation이 인증서를 제공합니다.)
 
 이 저장소의 GitHub Actions 워크플로가 태그된 소스 코드로 빌드한 배포 파일만 서명합니다.
@@ -106,15 +105,19 @@ Free code signing provided by [SignPath.io](https://about.signpath.io/), certifi
 
 팀 역할:
 
-- 커미터·리뷰어: [rity73](https://github.com/rity73)
-- 승인자: [rity73](https://github.com/rity73)
+- 작성자(Authors, 커미터): [rity73](https://github.com/rity73)
+- 리뷰어(Reviewers): [rity73](https://github.com/rity73)
+- 승인자(Approvers): [rity73](https://github.com/rity73)
 
 모든 서명 요청은 승인자가 직접 승인합니다.
 
 ### 개인정보 보호
 
-이 프로그램은 다른 네트워크 시스템으로 어떤 정보도 보내지 않습니다. USB로 키보드하고만
-통신하며, 설정과 프로필은 사용자의 PC에만 저장합니다.
+This program will not transfer any information to other networked systems unless specifically
+requested by the user or the person installing or operating it.
+
+이 프로그램은 사용자가 직접 요청하지 않는 한 다른 네트워크 시스템으로 어떤 정보도 보내지 않습니다.
+USB로 키보드하고만 통신하며, 설정과 프로필은 사용자의 PC에만 저장합니다.
 
 ## 라이선스
 

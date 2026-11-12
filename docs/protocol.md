@@ -385,7 +385,9 @@ Battery (CMD 0x20): `<< 00 20 01 00 5C …` → 0x5C = **92 %** [O] (byte 3 of t
   `MUI::KeyLayerButton`s (this+0x374 / +0x378). Each unchecks the other button, stores
   `fn_switch` = 0 (FUN_00417910) or 1 (FUN_00417a90) in the settings table, then enqueues event 0x0B
   (send settings). So `fn_switch` follows a two-button layer selector; its effect on the keyboard is [U]
-  (hypothesis: 1 makes the Fn layer the default, i.e. an Fn lock).
+  (hypothesis was an Fn lock, but see below).
+- `fn_switch` = 1 over the receiver: acknowledged; F1-F12 still send standard F-keys without Fn [O].
+  So it is not an Fn lock for the F row; no keyboard-side effect found yet [U].
 - Sleep value 1 ("1 min" in the original app) makes the keyboard sleep after a short idle time, as
   reported by the user [O].
 - Fn-layer key map (CMD 0x12, 21 packets) with `fn.Pause = 03 E2 00 00` (mute): Fn+Pause mutes,

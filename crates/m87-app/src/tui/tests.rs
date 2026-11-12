@@ -25,6 +25,7 @@ fn click(app: &mut App, hit: Hit) {
 }
 
 fn app() -> App {
+    crate::state::set_data_dir(std::env::temp_dir().join(format!("m87pro-tool-test-{}", std::process::id())));
     let mut app = App::blank();
     app.link = Some(Link::Dongle);
     app.battery = Some(92);

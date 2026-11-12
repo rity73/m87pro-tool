@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 m87-proto.workspace = true
 m87-hid.workspace = true
+m87-core.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 ratatui.workspace = true

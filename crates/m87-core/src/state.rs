@@ -71,14 +71,23 @@ fn layer_code(l: Layer) -> u8 {
     }
 }
 
-#[cfg(test)]
-fn data_dir() -> PathBuf {
-    // Tests never touch the real settings.
-    std::env::temp_dir().join(format!("m87pro-tool-test-{}", std::process::id()))
+static DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Use another folder instead of `%APPDATA%\m87pro-tool` (for tests).
+/// Only the first call has an effect.
+pub fn set_data_dir(dir: PathBuf) {
+    let _ = DATA_DIR.set(dir);
 }
 
-#[cfg(not(test))]
-fn data_dir() -> PathBuf {
+/// Folder with everything saved on this PC.
+pub fn data_dir() -> PathBuf {
+    if let Some(d) = DATA_DIR.get() {
+        return d.clone();
+    }
+    if cfg!(test) {
+        // Tests never touch the real settings.
+        return std::env::temp_dir().join(format!("m87pro-tool-test-{}", std::process::id()));
+    }
     let base = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
     base.join("m87pro-tool")
 }

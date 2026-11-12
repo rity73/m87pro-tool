@@ -163,6 +163,21 @@ fn lighting(f: &mut Frame, app: &mut App, body: Rect) {
     level_row(f, &mut app.hits, a, y + 1, "Speed", Level::Speed, l.speed, MAX_LEVEL, c.speed, if c.speed { "" } else { unused });
     level_row(f, &mut app.hits, a, y + 2, "Direction", Level::Direction, l.direction, 3, c.direction, if c.direction { "Code 0-3; the result depends on the effect." } else { unused });
     apply_button(f, &mut app.hits, a, y + 4, "");
+    led_note(f, a, y + 6);
+}
+
+/// Keyboard behavior the program cannot change (found by testing).
+fn led_note(f: &mut Frame, a: Rect, y: u16) {
+    let lines = [
+        "Lights stay off? Press Fn+Backspace on the keyboard to turn lighting back on.",
+        "The light bar above the arrow keys is set only with keyboard shortcuts.",
+    ];
+    for (i, l) in lines.iter().enumerate() {
+        let y = y + i as u16;
+        if y < a.bottom() {
+            f.render_widget(Paragraph::new(Span::styled(*l, DIM)), Rect::new(a.x, y, a.width, 1));
+        }
+    }
 }
 
 // ------------------------------------------------------------ 2 Key colors
@@ -196,6 +211,7 @@ fn key_colors(f: &mut Frame, app: &mut App, body: Rect) {
             Rect::new(a.x, y + 3, a.width, 1),
         );
     }
+    led_note(f, a, y + 4);
 }
 
 // ------------------------------------------------------------ 3 Key mapping

@@ -388,6 +388,9 @@ Battery (CMD 0x20): `<< 00 20 01 00 5C …` → 0x5C = **92 %** [O] (byte 3 of t
   (hypothesis was an Fn lock, but see below).
 - `fn_switch` = 1 over the receiver: acknowledged; F1-F12 still send standard F-keys without Fn [O].
   So it is not an Fn lock for the F row; no keyboard-side effect found yet [U].
+- Fn+Backspace on the keyboard turns all lighting off and on. While it is off, lighting commands from the
+  tool have no visible effect. The LED bar above the arrow keys is controlled only by keyboard shortcuts;
+  no command for it was found [O, user].
 - Sleep value 1 ("1 min" in the original app) makes the keyboard sleep after a short idle time, as
   reported by the user [O].
 - Fn-layer key map (CMD 0x12, 21 packets) with `fn.Pause = 03 E2 00 00` (mute): Fn+Pause mutes,

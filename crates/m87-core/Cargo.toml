@@ -1,0 +1,11 @@
+[package]
+name = "m87-core"
+description = "Saved state, profiles and complete send plans shared by the M87 Pro tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+m87-proto.workspace = true
+anyhow.workspace = true

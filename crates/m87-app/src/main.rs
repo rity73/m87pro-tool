@@ -10,8 +10,9 @@ use m87_proto::keymap::{KeyAction, Layer, MEDIA, Mouse};
 use m87_proto::settings::SLEEP_CHOICES;
 use m87_proto::{hex, Link};
 
-mod state;
 mod tui;
+
+use m87_core::state;
 
 use state::{LightMode, State};
 

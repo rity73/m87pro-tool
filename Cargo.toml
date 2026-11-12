@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/m87-proto", "crates/m87-hid", "crates/m87-app"]
+members = ["crates/m87-proto", "crates/m87-hid", "crates/m87-core", "crates/m87-app", "crates/m87-gui"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +11,7 @@ rust-version = "1.80"
 [workspace.dependencies]
 m87-proto = { path = "crates/m87-proto" }
 m87-hid = { path = "crates/m87-hid" }
+m87-core = { path = "crates/m87-core" }
 clap = { version = "4.6", features = ["derive"] }
 anyhow = "1"
 ratatui = "0.30"

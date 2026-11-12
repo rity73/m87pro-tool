@@ -378,6 +378,9 @@ Battery (CMD 0x20): `<< 00 20 01 00 5C …` → 0x5C = **92 %** [O] (byte 3 of t
 - Macro directory: unused entries are written as `FF FF FF FF`, including entries after the last macro.
 - Over the 2.4 GHz receiver, lighting effects (`0x05`) and per-key colors (`0x05` mode 0x80 + `0x14`
   table) work as on the USB cable, checked with the TUI together with key reset [O].
+- Fn layer (`0x12` table, "Fn Switch Function" / "Fn Layer" in the original UI, language strings 291-292)
+  works over the receiver with the settings value `fn_switch` = 0, so that value does not gate the Fn layer [O].
+  What `fn_switch` changes on the keyboard is still [U].
 - Fn-layer key map (CMD 0x12, 21 packets) with `fn.Pause = 03 E2 00 00` (mute): Fn+Pause mutes,
   Pause alone unchanged [O]. Writing the table again with all zeros restores the default [O].
 - The ack reply for key-map slices echoes CMD/LEN/IDX but returns zero payload [O].

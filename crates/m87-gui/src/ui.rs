@@ -339,6 +339,8 @@ thread_local! {
     static DRAG_LAST: Cell<Option<u8>> = const { Cell::new(None) };
     /// Page shown now, for drawing the navigation without the model.
     static SHOWN: Cell<u8> = const { Cell::new(0) };
+    /// Text colors of the status line and the connection label.
+    static LABEL_FG: Cell<(Rgb, Rgb)> = const { Cell::new((theme::TEXT, theme::TEXT)) };
 }
 
 /// One keyboard user at a time (sends and battery reads).
@@ -820,6 +822,13 @@ fn sync_controls(g: &mut G) {
     };
     set_text(ui.h(CONN), &conn);
     set_text(ui.h(TITLE), t(app.page.title()));
+    let status_fg = match app.status.0 {
+        Tone::Err => theme::ERR_TEXT,
+        Tone::Ok => theme::OK_TEXT,
+        Tone::Info => theme::TEXT,
+    };
+    let conn_fg = if app.link.is_some() { theme::OK_TEXT } else { theme::ERR_TEXT };
+    LABEL_FG.with(|c| c.set((status_fg, conn_fg)));
     set_text(ui.h(STATUS), &app.status.1);
     ui.invalidate(STATUS);
     ui.invalidate(CONN);
@@ -1529,31 +1538,19 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LR
                 LRESULT(0)
             }
             WM_CTLCOLORSTATIC => {
+                // Decided from the control id and the colors saved by `sync`,
+                // because a label can repaint while the model is in use.
                 let hdc = HDC(wp.0 as *mut c_void);
-                let ctl = HWND(lp.0 as *mut c_void);
-                let mut on_card = true;
-                let mut fg = theme::TEXT;
-                G_CELL.with(|c| {
-                    if let Ok(b) = c.try_borrow() {
-                        if let Some(g) = b.as_ref() {
-                            let ui = &g.ui;
-                            on_card = ![id::CONN, id::STATUS, id::TITLE, id::LANG_LBL].iter().any(|i| ui.h(*i) == ctl);
-                            if ctl == ui.h(id::STATUS) {
-                                fg = match g.app.status.0 {
-                                    Tone::Err => theme::ERR_TEXT,
-                                    Tone::Ok => theme::OK_TEXT,
-                                    Tone::Info => theme::TEXT,
-                                };
-                            } else if [id::L_UNSENT, id::C_UNSENT, id::K_UNSENT, id::S_UNSENT].iter().any(|i| ui.h(*i) == ctl) {
-                                fg = theme::NOTE_TEXT;
-                            } else if ctl == ui.h(id::CONN) {
-                                fg = if g.app.link.is_some() { theme::OK_TEXT } else { theme::ERR_TEXT };
-                            } else if ctl == ui.h(id::LANG_LBL) {
-                                fg = theme::TEXT_DIM;
-                            }
-                        }
-                    }
-                });
+                let cid = GetDlgCtrlID(HWND(lp.0 as *mut c_void)) as u16;
+                let on_card = ![id::CONN, id::STATUS, id::TITLE, id::LANG_LBL].contains(&cid);
+                let (status, conn) = LABEL_FG.with(|c| c.get());
+                let fg = match cid {
+                    id::STATUS => status,
+                    id::CONN => conn,
+                    id::LANG_LBL => theme::TEXT_DIM,
+                    id::L_UNSENT | id::C_UNSENT | id::K_UNSENT | id::S_UNSENT => theme::NOTE_TEXT,
+                    _ => theme::TEXT,
+                };
                 SetTextColor(hdc, kbview::colorref(fg));
                 SetBkColor(hdc, kbview::colorref(if on_card { theme::CARD } else { theme::BG }));
                 LRESULT(if on_card { theme::brush_card() } else { theme::brush_bg() }.0 as isize)

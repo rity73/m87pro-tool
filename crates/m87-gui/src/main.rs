@@ -8,6 +8,7 @@ mod app;
 mod capture;
 mod i18n;
 mod kbview;
+mod theme;
 mod ui;
 
 fn main() {

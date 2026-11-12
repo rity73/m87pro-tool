@@ -23,7 +23,7 @@ Both programs can:
 Settings and profiles are stored as plain files in `%APPDATA%\m87pro-tool`.
 
 The programs are for the Nodal Studio M87 Pro only. Both show the license and this notice in
-their About page (`m87`: the About button at the top; `m87-gui`: the About tab).
+their About page (`m87`: the About button at the top; `m87-gui`: About in the left menu).
 
 > This project is not affiliated with, endorsed by or supported by Nodal Studio or Sonix.
 > Use it at your own risk.

@@ -24,9 +24,10 @@ use windows::Win32::UI::Controls::Dialogs::{
     ChooseColorW, GetOpenFileNameW, GetSaveFileNameW, CC_FULLOPEN, CC_RGBINIT, CHOOSECOLORW, OFN_FILEMUSTEXIST,
     OFN_NOCHANGEDIR, OFN_OVERWRITEPROMPT, OFN_PATHMUSTEXIST, OPENFILENAMEW,
 };
+use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_CAPTION_COLOR};
 use windows::Win32::UI::Controls::{
     InitCommonControlsEx, DRAWITEMSTRUCT, ICC_BAR_CLASSES, ICC_STANDARD_CLASSES, ICC_TAB_CLASSES, INITCOMMONCONTROLSEX,
-    NMHDR, ODS_DISABLED,
+    MEASUREITEMSTRUCT, NMHDR, NMTTDISPINFOW, ODT_LISTBOX, TOOLTIP_FLAGS, TTTOOLINFOW,
 };
 use windows::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForSystem, GetDpiForWindow, SystemParametersInfoForDpi};
 use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, GetCapture, GetFocus, IsWindowEnabled, ReleaseCapture, SetCapture};
@@ -34,13 +35,20 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::app::{App, Job, Packets, Page, Tone, PALETTE};
 use crate::i18n::{effect_name, media_name, mouse_name, system_lang, tr, Lang, T};
-use crate::kbview::{self, colorref, text_on, Mode};
+use crate::kbview::{self, Mode};
+use crate::theme::{self, glyph, Look};
 
 // ---------------------------------------------------------------- constants
 
 /// Design size of the client area, in 96-DPI pixels.
-const CLIENT_W: i32 = 980;
+const CLIENT_W: i32 = 1140;
 const CLIENT_H: i32 = 680;
+
+/// Page controls are laid out from the old single-column design and moved
+/// right by this much to make room for the navigation column.
+const CONTENT_DX: i32 = 160;
+/// White card behind the page controls: left, top, right, bottom.
+const CARD: [i32; 4] = [168, 64, 1132, 612];
 
 const WM_APP_DONE: u32 = WM_APP + 1;
 const WM_APP_BATTERY: u32 = WM_APP + 2;
@@ -50,7 +58,6 @@ const TIMER_SCAN: usize = 1;
 const TIMER_BATTERY: usize = 2;
 
 // Control styles and messages (plain numbers keep the types simple).
-const BS_PUSHBUTTON: u32 = 0x0;
 const BS_AUTOCHECKBOX: u32 = 0x3;
 const BS_AUTORADIOBUTTON: u32 = 0x9;
 const BS_OWNERDRAW: u32 = 0xB;
@@ -78,14 +85,19 @@ const TBM_GETPOS: u32 = 0x400;
 const TBM_SETPOS: u32 = 0x405;
 const TBM_SETRANGEMIN: u32 = 0x407;
 const TBM_SETRANGEMAX: u32 = 0x408;
-const TCM_GETCURSEL: u32 = 0x1300 + 11;
-const TCM_SETCURSEL: u32 = 0x1300 + 12;
-const TCM_DELETEALLITEMS: u32 = 0x1300 + 9;
-const TCM_SETPADDING: u32 = 0x1300 + 43;
-const TCM_SETMINTABWIDTH: u32 = 0x1300 + 49;
-const TCM_INSERTITEMW: u32 = 0x1300 + 62;
-const TCN_SELCHANGE: u32 = (-551i32) as u32;
-const TCIF_TEXT: u32 = 0x1;
+const LBS_OWNERDRAWFIXED: u32 = 0x10;
+const LBS_HASSTRINGS: u32 = 0x40;
+const LB_GETTEXT: u32 = 0x189;
+const LB_GETTEXTLEN: u32 = 0x18A;
+const LB_SETITEMHEIGHT: u32 = 0x1A0;
+const TTS_ALWAYSTIP: u32 = 0x1;
+const TTS_NOPREFIX: u32 = 0x2;
+const TTF_IDISHWND: u32 = 0x1;
+const TTF_SUBCLASS: u32 = 0x10;
+const TTM_ADDTOOLW: u32 = WM_USER + 50;
+const TTN_GETDISPINFOW: u32 = (-530i32) as u32;
+/// Height of a list box row, in 96-DPI pixels.
+const LIST_ROW: i32 = 30;
 const BN_CLICKED: u32 = 0;
 const LBN_SELCHANGE: u32 = 1;
 const CBN_SELCHANGE: u32 = 1;
@@ -93,22 +105,12 @@ const MK_LBUTTON: usize = 0x1;
 const IDOK_CMD: u16 = 1;
 const IDCANCEL_CMD: u16 = 2;
 
-/// Tab control item (TCITEMW).
-#[repr(C)]
-struct TcItem {
-    mask: u32,
-    state: u32,
-    state_mask: u32,
-    text: *mut u16,
-    cch: i32,
-    image: i32,
-    lparam: isize,
-}
-
 // ---------------------------------------------------------------- control ids
 
 mod id {
-    pub const TAB: u16 = 100;
+    /// Navigation items, one per page (300..=306).
+    pub const NAV: u16 = 300;
+    pub const TITLE: u16 = 310;
     pub const CONN: u16 = 101;
     pub const LANG_LBL: u16 = 102;
     pub const LANG: u16 = 103;
@@ -295,6 +297,7 @@ enum Font {
     Normal,
     Bold,
     Mono,
+    Title,
 }
 
 struct Ctl {
@@ -303,6 +306,8 @@ struct Ctl {
     rect: [i32; 4],
     text: Option<T>,
     font: Font,
+    /// Owner-drawn button (drawn by `draw_item`).
+    owner: bool,
 }
 
 struct Ui {
@@ -320,6 +325,8 @@ struct Ui {
     /// Macro number whose text is in the steps box.
     macro_loaded: Option<u8>,
     battery_running: bool,
+    /// Tooltip that names the color swatches.
+    tip: HWND,
 }
 
 struct G {
@@ -330,6 +337,8 @@ struct G {
 thread_local! {
     static G_CELL: RefCell<Option<G>> = const { RefCell::new(None) };
     static DRAG_LAST: Cell<Option<u8>> = const { Cell::new(None) };
+    /// Page shown now, for drawing the navigation without the model.
+    static SHOWN: Cell<u8> = const { Cell::new(0) };
 }
 
 /// One keyboard user at a time (sends and battery reads).
@@ -375,7 +384,8 @@ impl Ui {
             .unwrap_or_default()
         };
         self.by_id.insert(id, self.ctls.len());
-        self.ctls.push(Ctl { hwnd, page, rect, text, font });
+        let owner = style & 0xF == BS_OWNERDRAW && unsafe { class.to_string() }.is_ok_and(|c| c == "BUTTON");
+        self.ctls.push(Ctl { hwnd, page, rect, text, font, owner });
     }
 
     fn label(&mut self, id: u16, page: Option<Page>, text: Option<T>, rect: [i32; 4]) {
@@ -383,15 +393,15 @@ impl Ui {
     }
 
     fn button(&mut self, id: u16, page: Page, text: T, rect: [i32; 4]) {
-        self.add(id, Some(page), w!("BUTTON"), Some(text), BS_PUSHBUTTON | WS_TABSTOP.0, 0, rect, Font::Normal);
+        self.add(id, Some(page), w!("BUTTON"), Some(text), BS_OWNERDRAW | WS_TABSTOP.0, 0, rect, Font::Normal);
     }
 
     fn check(&mut self, id: u16, page: Page, text: T, rect: [i32; 4]) {
         self.add(id, Some(page), w!("BUTTON"), Some(text), BS_AUTOCHECKBOX | WS_TABSTOP.0, 0, rect, Font::Normal);
     }
 
-    fn owner_button(&mut self, id: u16, page: Page, rect: [i32; 4]) {
-        self.add(id, Some(page), w!("BUTTON"), None, BS_OWNERDRAW | WS_TABSTOP.0, 0, rect, Font::Normal);
+    fn owner_button(&mut self, id: u16, page: Page, text: Option<T>, rect: [i32; 4]) {
+        self.add(id, Some(page), w!("BUTTON"), text, BS_OWNERDRAW | WS_TABSTOP.0, 0, rect, Font::Normal);
     }
 
     fn combo(&mut self, id: u16, page: Option<Page>, rect: [i32; 4]) {
@@ -404,8 +414,8 @@ impl Ui {
             Some(page),
             w!("LISTBOX"),
             None,
-            LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_TABSTOP.0 | WS_VSCROLL.0 | WS_BORDER.0,
-            0,
+            LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | WS_TABSTOP.0 | WS_VSCROLL.0,
+            WS_EX_CLIENTEDGE.0,
             rect,
             Font::Normal,
         );
@@ -422,20 +432,28 @@ impl Ui {
     fn build(&mut self) {
         use id::*;
         use Page::*;
-        self.add(TAB, None, w!("SysTabControl32"), None, WS_CLIPSIBLINGS.0 | WS_TABSTOP.0, 0, [8, 38, 964, 30], Font::Normal);
-        self.label(CONN, None, None, [12, 10, 700, 22]);
-        self.label(LANG_LBL, None, Some(T::Language), [730, 10, 100, 22]);
-        self.combo(LANG, None, [835, 6, 133, 200]);
-        self.label(STATUS, None, None, [12, 626, 956, 48]);
+        // Fonts first: list boxes ask for their row height while created.
+        self.make_fonts();
+        // Navigation column.
+        for (i, p) in Page::ALL.iter().enumerate() {
+            let y = if *p == About { 466 } else { 16 + i as i32 * 40 };
+            self.add(NAV + i as u16, None, w!("BUTTON"), Some(p.title()), BS_OWNERDRAW | WS_TABSTOP.0, 0, [8, y, 152, 36], Font::Normal);
+        }
+        self.label(LANG_LBL, None, Some(T::Language), [16, 516, 136, 20]);
+        self.combo(LANG, None, [12, 538, 144, 200]);
+        self.label(CONN, None, None, [16, 580, 140, 92]);
+        // Page title above the card, status line below it.
+        self.add(TITLE, None, w!("STATIC"), None, SS_LEFT | SS_NOPREFIX, 0, [184, 16, 700, 40], Font::Title);
+        self.label(STATUS, None, None, [176, 622, 956, 50]);
 
         // 1 Lighting
         self.label(L_EFFECT_LBL, Some(Lighting), Some(T::Effect), [24, 78, 200, 20]);
         self.list(L_EFFECTS, Lighting, [24, 100, 200, 470]);
         self.label(L_COLOR_LBL, Some(Lighting), Some(T::Color), [250, 102, 110, 20]);
         for i in 0..9 {
-            self.owner_button(L_PALETTE + i, Lighting, [370 + i as i32 * 64, 96, 58, 28]);
+            self.owner_button(L_PALETTE + i, Lighting, Some(PALETTE[i as usize].0), [370 + i as i32 * 40, 90, 34, 34]);
         }
-        self.owner_button(L_CUSTOM, Lighting, [370, 132, 186, 28]);
+        self.owner_button(L_CUSTOM, Lighting, None, [370, 132, 200, 30]);
         self.check(L_RAINBOW, Lighting, T::Rainbow, [370, 168, 400, 24]);
         for (lbl, tb, val, y, max) in [
             (L_BRIGHT_LBL, L_BRIGHT, L_BRIGHT_VAL, 214, MAX_LEVEL as isize),
@@ -461,9 +479,9 @@ impl Ui {
         self.label(C_HELP, Some(KeyColors), Some(T::KeyColorsHelp), [24, 332, 932, 20]);
         self.label(C_BRUSH_LBL, Some(KeyColors), Some(T::BrushColor), [24, 366, 110, 20]);
         for i in 0..10 {
-            self.owner_button(C_PALETTE + i, KeyColors, [140 + i as i32 * 64, 360, 58, 28]);
+            self.owner_button(C_PALETTE + i, KeyColors, Some(PALETTE[i as usize].0), [140 + i as i32 * 40, 356, 34, 34]);
         }
-        self.owner_button(C_CUSTOM, KeyColors, [784, 360, 172, 28]);
+        self.owner_button(C_CUSTOM, KeyColors, None, [560, 358, 200, 30]);
         self.button(C_PAINT_ALL, KeyColors, T::PaintAll, [140, 400, 170, 30]);
         self.button(C_ALL_OFF, KeyColors, T::AllOff, [320, 400, 170, 30]);
         self.label(C_LIT, Some(KeyColors), None, [504, 406, 300, 20]);
@@ -566,6 +584,38 @@ impl Ui {
         self.add(A_SOURCE_LBL, Some(About), w!("STATIC"), Some(T::AboutSourceTitle), SS_LEFT | SS_NOPREFIX, 0, [24, 384, 300, 20], Font::Bold);
         self.label(A_SOURCE, Some(About), None, [24, 408, 930, 20]);
 
+        // Swatches show only a color; the tooltip gives its name.
+        unsafe {
+            let hinst = GetModuleHandleW(None).map(|h| HINSTANCE(h.0)).ok();
+            self.tip = CreateWindowExW(
+                WS_EX_TOPMOST,
+                w!("tooltips_class32"),
+                None,
+                WS_POPUP | WINDOW_STYLE(TTS_ALWAYSTIP | TTS_NOPREFIX),
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                Some(self.main),
+                None,
+                hinst,
+                None,
+            )
+            .unwrap_or_default();
+        }
+        for cid in (L_PALETTE..L_PALETTE + 9).chain(C_PALETTE..C_PALETTE + 10) {
+            let ti = TTTOOLINFOW {
+                cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32,
+                uFlags: TOOLTIP_FLAGS(TTF_IDISHWND | TTF_SUBCLASS),
+                hwnd: self.main,
+                uId: self.h(cid).0 as usize,
+                // LPSTR_TEXTCALLBACKW: ask for the text when shown.
+                lpszText: PWSTR(usize::MAX as *mut u16),
+                ..Default::default()
+            };
+            send(self.tip, TTM_ADDTOOLW, 0, &ti as *const _ as isize);
+        }
+
     }
 
     /// Fonts for the current DPI.
@@ -597,6 +647,7 @@ impl Ui {
                 face(&mut base, "Segoe UI");
             }
             self.font = CreateFontIndirectW(&base);
+            theme::set_fonts(self.dpi, &base, self.font);
             let mut b = base;
             b.lfWeight = 700;
             self.bold = CreateFontIndirectW(&b);
@@ -614,15 +665,20 @@ impl Ui {
         self.make_fonts();
         for c in &self.ctls {
             let [x, y, w, h] = c.rect;
+            let x = if c.page.is_some() { x + CONTENT_DX } else { x };
             let font = match c.font {
                 Font::Normal => self.font,
                 Font::Bold => self.bold,
                 Font::Mono => self.mono,
+                Font::Title => theme::title_font(),
             };
             unsafe {
                 let _ = SetWindowPos(c.hwnd, None, self.s(x), self.s(y), self.s(w), self.s(h), SWP_NOZORDER | SWP_NOACTIVATE);
             }
             send(c.hwnd, WM_SETFONT, font.0 as usize, 1);
+        }
+        for cid in [id::L_EFFECTS, id::M_LIST, id::P_LIST] {
+            send(self.h(cid), LB_SETITEMHEIGHT, 0, self.s(LIST_ROW) as isize);
         }
     }
 
@@ -641,19 +697,6 @@ impl Ui {
                 set_text(c.hwnd, tr(lang, t));
             }
         }
-        // Recreate the tabs so their widths fit the new words.
-        let tab = self.h(id::TAB);
-        let current = send(tab, TCM_GETCURSEL, 0, 0).max(0) as usize;
-        send(tab, TCM_DELETEALLITEMS, 0, 0);
-        // Same padding for every tab, so short words do not get wide tabs.
-        send(tab, TCM_SETMINTABWIDTH, 0, self.s(24) as isize);
-        send(tab, TCM_SETPADDING, 0, (self.s(10) | (self.s(4) << 16)) as isize);
-        for p in Page::ALL {
-            let mut text = wide(tr(lang, p.title()));
-            let item = TcItem { mask: TCIF_TEXT, state: 0, state_mask: 0, text: text.as_mut_ptr(), cch: 0, image: -1, lparam: 0 };
-            send(tab, TCM_INSERTITEMW, p as usize, &item as *const _ as isize);
-        }
-        send(tab, TCM_SETCURSEL, current, 0);
         // Lists whose items are translated.
         self.items.remove(&id::L_EFFECTS);
         self.items.remove(&id::K_MOUSE);
@@ -678,7 +721,11 @@ impl Ui {
                 }
             }
         }
-        send(self.h(id::TAB), TCM_SETCURSEL, page as usize, 0);
+        SHOWN.with(|s| s.set(page as u8));
+        set_text(self.h(id::TITLE), tr(self.lang, page.title()));
+        for i in 0..Page::ALL.len() as u16 {
+            self.invalidate(id::NAV + i);
+        }
     }
 
     fn set_items(&mut self, cid: u16, items: Vec<String>, combo: bool) {
@@ -747,6 +794,18 @@ impl Ui {
 // ---------------------------------------------------------------- sync model -> controls
 
 fn sync(g: &mut G) {
+    sync_controls(g);
+    // Owner-drawn buttons may have been painted while the model was in use
+    // (a button repaints at once when its text changes); draw them again.
+    let page = g.app.page;
+    for c in g.ui.ctls.iter().filter(|c| c.owner && c.page == Some(page)) {
+        unsafe {
+            let _ = InvalidateRect(Some(c.hwnd), None, false);
+        }
+    }
+}
+
+fn sync_controls(g: &mut G) {
     let G { app, ui } = g;
     let lang = app.lang;
     let t = |x: T| tr(lang, x);
@@ -754,12 +813,13 @@ fn sync(g: &mut G) {
 
     // Top bar and status.
     let conn = match (app.link, app.battery) {
-        (Some(Link::Dongle), Some(b)) => format!("{}     {} {b}%", t(T::ConnDongle), t(T::Battery)),
+        (Some(Link::Dongle), Some(b)) => format!("{}\n{} {b}%", t(T::ConnDongle), t(T::Battery)),
         (Some(Link::Dongle), None) => t(T::ConnDongle).to_string(),
-        (Some(Link::Wired), _) => format!("{}     {} {}", t(T::ConnWired), t(T::Battery), t(T::Charging)),
+        (Some(Link::Wired), _) => format!("{}\n{} {}", t(T::ConnWired), t(T::Battery), t(T::Charging)),
         (None, _) => t(T::NotConnected).to_string(),
     };
     set_text(ui.h(CONN), &conn);
+    set_text(ui.h(TITLE), t(app.page.title()));
     set_text(ui.h(STATUS), &app.status.1);
     ui.invalidate(STATUS);
     ui.invalidate(CONN);
@@ -915,7 +975,7 @@ fn sync(g: &mut G) {
             let has = app.profile_sel.is_some();
             ui.enable(P_LOAD, has);
             ui.enable(P_DELETE, has);
-            set_text(ui.h(P_CONN), &conn);
+            set_text(ui.h(P_CONN), &conn.replace('\n', "     "));
             set_text(ui.h(P_DATA), &format!("{} {}", t(T::DataFolder), state::data_dir().display()));
         }
         Page::About => {
@@ -984,6 +1044,15 @@ fn on_command(g: &mut G, cid: u16, code: u32) -> Option<Later> {
     let ui = &mut g.ui;
     match cid {
         IDCANCEL_CMD => app.cancel(),
+        c if (NAV..NAV + Page::ALL.len() as u16).contains(&c) => {
+            app.page = Page::ALL[(c - NAV) as usize];
+            app.choosing_key = false;
+            if app.page == Page::Profiles {
+                let sel = app.selected_profile();
+                app.refresh_profiles(sel.as_deref());
+            }
+            ui.show_page(app.page);
+        }
         IDOK_CMD => {
             let focus = unsafe { GetFocus() };
             if focus == ui.h(P_NAME) {
@@ -1138,7 +1207,7 @@ fn pick_color(owner: HWND, start: Rgb) -> Option<Rgb> {
     let mut cc = CHOOSECOLORW {
         lStructSize: std::mem::size_of::<CHOOSECOLORW>() as u32,
         hwndOwner: owner,
-        rgbResult: colorref(start),
+        rgbResult: kbview::colorref(start),
         lpCustColors: custom.as_mut_ptr(),
         Flags: CC_RGBINIT | CC_FULLOPEN,
         ..Default::default()
@@ -1225,54 +1294,53 @@ fn run_later(hwnd: HWND, later: Later) {
 
 // ---------------------------------------------------------------- drawing
 
-fn draw_item(g: &G, dis: &DRAWITEMSTRUCT) {
+fn draw_item(g: Option<&G>, dis: &DRAWITEMSTRUCT) {
     use id::*;
     let cid = dis.CtlID as u16;
-    let app = &g.app;
-    let (color, label, selected) = if (L_PALETTE..L_PALETTE + 9).contains(&cid) {
-        let (t, c) = PALETTE[(cid - L_PALETTE) as usize];
-        (c, app.t(t).to_string(), !app.lighting.rainbow && app.lighting.color == c)
-    } else if (C_PALETTE..C_PALETTE + 10).contains(&cid) {
-        let (t, c) = PALETTE[(cid - C_PALETTE) as usize];
-        (c, app.t(t).to_string(), app.brush == c)
-    } else if cid == L_CUSTOM {
-        let c = app.lighting.color;
-        (c, format!("{}  #{}", app.t(T::Custom), c.to_hex()), false)
-    } else if cid == C_CUSTOM {
-        let c = app.brush;
-        (c, format!("{}  #{}", app.t(T::Custom), c.to_hex()), false)
-    } else {
+    let h = dis.hwndItem;
+    if dis.CtlType == ODT_LISTBOX {
+        if dis.itemID == u32::MAX {
+            return;
+        }
+        let n = send(h, LB_GETTEXTLEN, dis.itemID as usize, 0).max(0) as usize;
+        let mut buf = vec![0u16; n + 1];
+        let got = send(h, LB_GETTEXT, dis.itemID as usize, buf.as_mut_ptr() as isize).max(0) as usize;
+        let text = String::from_utf16_lossy(&buf[..got.min(n)]);
+        let enabled = unsafe { IsWindowEnabled(h).as_bool() };
+        theme::draw_list_item(dis, &text, enabled);
         return;
-    };
-    let disabled = dis.itemState.0 & ODS_DISABLED.0 != 0;
-    let (fill, text) = if disabled {
-        (Rgb::new(0xE4, 0xE4, 0xE4), Rgb::new(0xA0, 0xA0, 0xA0))
-    } else if color == Rgb::default() {
-        (Rgb::new(0x30, 0x30, 0x30), Rgb::new(0xFF, 0xFF, 0xFF))
-    } else {
-        (color, text_on(color))
-    };
-    unsafe {
-        let hdc = dis.hDC;
-        let mut r = dis.rcItem;
-        let border = CreateSolidBrush(colorref(if selected { Rgb::new(0, 0x78, 0xD7) } else { Rgb::new(0x90, 0x90, 0x90) }));
-        FillRect(hdc, &r, border);
-        let _ = DeleteObject(border.into());
-        let inset = if selected { g.ui.s(3) } else { 1 };
-        r.left += inset;
-        r.top += inset;
-        r.right -= inset;
-        r.bottom -= inset;
-        let b = CreateSolidBrush(colorref(fill));
-        FillRect(hdc, &r, b);
-        let _ = DeleteObject(b.into());
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, colorref(text));
-        let old = SelectObject(hdc, g.ui.font.into());
-        let mut w: Vec<u16> = label.encode_utf16().collect();
-        DrawTextW(hdc, &mut w, &mut r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
-        SelectObject(hdc, old);
     }
+    let label = get_text(h);
+    if (NAV..NAV + Page::ALL.len() as u16).contains(&cid) {
+        let i = (cid - NAV) as usize;
+        let glyph = [glyph::LIGHTING, glyph::KEY_COLORS, glyph::KEYS, glyph::MACROS, glyph::SETTINGS, glyph::PROFILES, glyph::ABOUT][i];
+        let selected = SHOWN.with(|s| s.get()) as usize == i;
+        theme::draw_button(dis, Look::Nav { glyph, selected }, &label, theme::BG);
+        return;
+    }
+    let look = if (L_PALETTE..L_PALETTE + 9).contains(&cid) || (C_PALETTE..C_PALETTE + 10).contains(&cid) {
+        // Swatches need the model to know which one is chosen.
+        let Some(g) = g else { return };
+        let app = &g.app;
+        if cid < C_PALETTE {
+            let c = PALETTE[(cid - L_PALETTE) as usize].1;
+            Look::Swatch { color: c, selected: !app.lighting.rainbow && app.lighting.color == c }
+        } else {
+            let c = PALETTE[(cid - C_PALETTE) as usize].1;
+            Look::Swatch { color: c, selected: app.brush == c }
+        }
+    } else if cid == L_CUSTOM || cid == C_CUSTOM {
+        let Some(g) = g else { return };
+        let c = if cid == L_CUSTOM { g.app.lighting.color } else { g.app.brush };
+        let text = format!("{}  #{}", tr(g.app.lang, T::Custom), c.to_hex());
+        theme::draw_button(dis, Look::ColorButton(c), &text, theme::CARD);
+        return;
+    } else if [L_APPLY, C_APPLY, K_APPLY, S_APPLY, M_SAVE].contains(&cid) {
+        Look::Primary
+    } else {
+        Look::Secondary
+    };
+    theme::draw_button(dis, look, &label, theme::CARD);
 }
 
 fn paint_view(hwnd: HWND) {
@@ -1384,18 +1452,13 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LR
             }
             WM_NOTIFY => {
                 let hdr = &*(lp.0 as *const NMHDR);
-                if hdr.idFrom == id::TAB as usize && hdr.code == TCN_SELCHANGE {
-                    with_g(|g| {
-                        let i = send(g.ui.h(id::TAB), TCM_GETCURSEL, 0, 0).max(0) as usize;
-                        g.app.page = Page::ALL[i.min(Page::ALL.len() - 1)];
-                        g.app.choosing_key = false;
-                        if g.app.page == Page::Profiles {
-                            let sel = g.app.selected_profile();
-                            g.app.refresh_profiles(sel.as_deref());
-                        }
-                        g.ui.show_page(g.app.page);
-                        sync(g);
-                    });
+                if hdr.code == TTN_GETDISPINFOW {
+                    // Tooltip of a color swatch: its window text is the color name.
+                    let info = &mut *(lp.0 as *mut NMTTDISPINFOW);
+                    let name: Vec<u16> = get_text(HWND(hdr.idFrom as *mut c_void)).encode_utf16().take(79).collect();
+                    info.szText = [0; 80];
+                    info.szText[..name.len()].copy_from_slice(&name);
+                    info.lpszText = PWSTR(info.szText.as_mut_ptr());
                 }
                 LRESULT(0)
             }
@@ -1446,38 +1509,54 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LR
             }
             WM_DRAWITEM => {
                 let dis = &*(lp.0 as *const DRAWITEMSTRUCT);
-                G_CELL.with(|c| {
-                    if let Ok(b) = c.try_borrow() {
-                        if let Some(g) = b.as_ref() {
-                            draw_item(g, dis);
-                        }
-                    }
+                G_CELL.with(|c| match c.try_borrow() {
+                    Ok(b) => draw_item(b.as_ref(), dis),
+                    Err(_) => draw_item(None, dis),
                 });
                 LRESULT(1)
+            }
+            WM_MEASUREITEM => {
+                let mis = &mut *(lp.0 as *mut MEASUREITEMSTRUCT);
+                mis.itemHeight = theme::s(LIST_ROW) as u32;
+                LRESULT(1)
+            }
+            WM_PAINT => {
+                let mut ps = PAINTSTRUCT::default();
+                let hdc = BeginPaint(hwnd, &mut ps);
+                let [l, t, r, b] = CARD.map(theme::s);
+                theme::card(hdc, RECT { left: l, top: t, right: r, bottom: b });
+                let _ = EndPaint(hwnd, &ps);
+                LRESULT(0)
             }
             WM_CTLCOLORSTATIC => {
                 let hdc = HDC(wp.0 as *mut c_void);
                 let ctl = HWND(lp.0 as *mut c_void);
-                SetBkColor(hdc, COLORREF(GetSysColor(COLOR_WINDOW)));
+                let mut on_card = true;
+                let mut fg = theme::TEXT;
                 G_CELL.with(|c| {
                     if let Ok(b) = c.try_borrow() {
                         if let Some(g) = b.as_ref() {
-                            if ctl == g.ui.h(id::STATUS) {
-                                let col = match g.app.status.0 {
-                                    Tone::Err => COLORREF(0x0020_20C0),
-                                    Tone::Ok => COLORREF(0x0000_7A00),
-                                    Tone::Info => COLORREF(GetSysColor(COLOR_WINDOWTEXT)),
+                            let ui = &g.ui;
+                            on_card = ![id::CONN, id::STATUS, id::TITLE, id::LANG_LBL].iter().any(|i| ui.h(*i) == ctl);
+                            if ctl == ui.h(id::STATUS) {
+                                fg = match g.app.status.0 {
+                                    Tone::Err => theme::ERR_TEXT,
+                                    Tone::Ok => theme::OK_TEXT,
+                                    Tone::Info => theme::TEXT,
                                 };
-                                SetTextColor(hdc, col);
-                            } else if [id::L_UNSENT, id::C_UNSENT, id::K_UNSENT, id::S_UNSENT].iter().any(|i| g.ui.h(*i) == ctl) {
-                                SetTextColor(hdc, COLORREF(0x0000_60C0));
-                            } else if ctl == g.ui.h(id::CONN) && g.app.link.is_none() {
-                                SetTextColor(hdc, COLORREF(0x0020_20C0));
+                            } else if [id::L_UNSENT, id::C_UNSENT, id::K_UNSENT, id::S_UNSENT].iter().any(|i| ui.h(*i) == ctl) {
+                                fg = theme::NOTE_TEXT;
+                            } else if ctl == ui.h(id::CONN) {
+                                fg = if g.app.link.is_some() { theme::OK_TEXT } else { theme::ERR_TEXT };
+                            } else if ctl == ui.h(id::LANG_LBL) {
+                                fg = theme::TEXT_DIM;
                             }
                         }
                     }
                 });
-                LRESULT(GetSysColorBrush(COLOR_WINDOW).0 as isize)
+                SetTextColor(hdc, kbview::colorref(fg));
+                SetBkColor(hdc, kbview::colorref(if on_card { theme::CARD } else { theme::BG }));
+                LRESULT(if on_card { theme::brush_card() } else { theme::brush_bg() }.0 as isize)
             }
             WM_DPICHANGED => {
                 let r = &*(lp.0 as *const RECT);
@@ -1506,6 +1585,7 @@ pub fn run() -> windows::core::Result<()> {
             dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
             dwICC: ICC_TAB_CLASSES | ICC_BAR_CLASSES | ICC_STANDARD_CLASSES,
         });
+        theme::init();
         let hinst = HINSTANCE(GetModuleHandleW(None)?.0);
         let cursor = LoadCursorW(None, IDC_ARROW)?;
         let icon = LoadIconW(None, IDI_APPLICATION).unwrap_or_default();
@@ -1515,7 +1595,7 @@ pub fn run() -> windows::core::Result<()> {
             hInstance: hinst,
             hCursor: cursor,
             hIcon: icon,
-            hbrBackground: GetSysColorBrush(COLOR_WINDOW),
+            hbrBackground: theme::brush_bg(),
             lpszClassName: w!("M87ProSettingsWindow"),
             ..Default::default()
         };
@@ -1551,6 +1631,9 @@ pub fn run() -> windows::core::Result<()> {
             Some(hinst),
             None,
         )?;
+        // Title bar in the window color (Windows 11; ignored elsewhere).
+        let caption = kbview::colorref(theme::BG);
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, &caption as *const _ as *const c_void, 4);
         let dpi_now = GetDpiForWindow(hwnd);
         if dpi_now != dpi {
             let mut rc = RECT { left: 0, top: 0, right: CLIENT_W * dpi_now as i32 / 96, bottom: CLIENT_H * dpi_now as i32 / 96 };
@@ -1571,6 +1654,7 @@ pub fn run() -> windows::core::Result<()> {
             items: HashMap::new(),
             macro_loaded: None,
             battery_running: false,
+            tip: HWND::default(),
         };
         ui.build();
         ui.layout();

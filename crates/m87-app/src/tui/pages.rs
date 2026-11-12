@@ -1,4 +1,4 @@
-//! Screen layout and the six pages.
+//! Screen layout, the six pages and the About box.
 
 use m87_proto::keymap::{modifier, KeyAction, Layer, Mouse, MEDIA};
 use m87_proto::layout::KEYS;
@@ -44,12 +44,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     };
     let conn_style = if app.link.is_some() { Style::new().fg(Color::LightGreen) } else { Style::new().fg(Color::LightRed) };
     let mut r = Row::new(top, top.y, &mut app.hits);
-    r.text(f, " M87 Pro ", Style::new().add_modifier(Modifier::BOLD).fg(Color::Black).bg(Color::Cyan))
+    r.text(f, " Nodal M87 Pro ", Style::new().add_modifier(Modifier::BOLD).fg(Color::Black).bg(Color::Cyan))
         .gap(2)
         .text(f, &conn, conn_style);
     let quit = Rect::new(top.right().saturating_sub(10), top.y, 10, 1);
     f.render_widget(Paragraph::new(Span::styled(" Quit (Q) ", BTN)), quit);
     app.hits.push((quit, Hit::Quit));
+    // Fits beside the longest status text at the minimum width of 80.
+    let about = Rect::new(quit.x.saturating_sub(8), top.y, 7, 1);
+    f.render_widget(Paragraph::new(Span::styled(" About ", BTN)), about);
+    app.hits.push((about, Hit::About));
 
     let mut r = Row::new(tabs, tabs.y, &mut app.hits);
     for t in Tab::ALL {
@@ -601,4 +605,37 @@ fn profiles(f: &mut Frame, app: &mut App, body: Rect) {
         let text = format!("  Data saved in {}", crate::state::path().parent().map(|p| p.display().to_string()).unwrap_or_default());
         f.render_widget(Paragraph::new(Span::styled(text, DIM)), Rect::new(a.x, y, a.width, 1));
     }
+}
+
+/// Product, license and privacy notice. Any key or click closes it.
+pub fn about(f: &mut Frame, app: &mut App) {
+    let area = f.area();
+    let w = 72.min(area.width);
+    let h = 17.min(area.height);
+    let r = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
+    f.render_widget(ratatui::widgets::Clear, r);
+    let block = Block::bordered().title(" About ").style(Style::new().fg(Color::White).bg(Color::Black));
+    let a = block.inner(r);
+    f.render_widget(block, r);
+    let bold = Style::new().add_modifier(Modifier::BOLD);
+    let lines: Vec<ratatui::text::Line> = vec![
+        Span::styled(format!("m87 {} - configuration tool for the Nodal Studio M87 Pro", env!("CARGO_PKG_VERSION")), bold).into(),
+        "".into(),
+        "For the Nodal Studio M87 Pro keyboard only (USB 0C45:8006,".into(),
+        "2.4 GHz receiver 0C45:FEFE). Do not use it with other keyboards.".into(),
+        "Unofficial: not affiliated with or supported by Nodal Studio or Sonix.".into(),
+        "".into(),
+        Span::styled("License", bold).into(),
+        "Copyright (c) 2026 rity73. Licensed under MIT or Apache-2.0, at".into(),
+        "your option. Provided \"as is\", without warranty of any kind.".into(),
+        "".into(),
+        Span::styled("Privacy", bold).into(),
+        "Sends no information over the network. Settings stay on this PC.".into(),
+        "".into(),
+        Span::styled("Source: https://github.com/rity73/m87pro-tool   (any key to close)", DIM).into(),
+    ];
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), a);
+    // Every click closes the box.
+    app.hits.clear();
+    app.hits.push((area, Hit::About));
 }

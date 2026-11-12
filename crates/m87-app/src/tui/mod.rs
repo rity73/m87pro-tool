@@ -100,6 +100,7 @@ pub enum Hit {
     AllOff,
     Recheck,
     Quit,
+    About,
     // Key mapping page
     Layer(Layer),
     MapKey(u8),
@@ -164,6 +165,8 @@ pub struct App {
     pending: Option<Pending>,
     pub hits: Vec<(Rect, Hit)>,
     pub quit: bool,
+    /// The About box (product, license, privacy) is open.
+    pub about: bool,
     /// Draft of everything saved on this PC (key map, macros, settings).
     pub state: State,
     /// Last state that was sent successfully (to show unsent changes).
@@ -212,6 +215,7 @@ impl App {
             pending: None,
             hits: Vec::new(),
             quit: false,
+            about: false,
             state: State::default(),
             saved: State::default(),
             layer: Layer::Base,
@@ -506,6 +510,7 @@ impl App {
                 };
             }
             Hit::Quit => self.quit = true,
+            Hit::About => self.about = !self.about,
             Hit::Layer(l) => self.layer = l,
             Hit::MapKey(i) => {
                 let Some(key) = KEYS.iter().find(|k| k.index == i) else { return };
@@ -661,6 +666,11 @@ impl App {
     }
 
     fn on_key(&mut self, code: KeyCode, mods: KeyModifiers) {
+        if self.about {
+            // Any key closes the About box.
+            self.about = false;
+            return;
+        }
         if self.macro_editing {
             match code {
                 KeyCode::Enter => self.save_macro(),
@@ -697,6 +707,7 @@ impl App {
             // Esc never quits: people press it to cancel things.
             KeyCode::Char('q') | KeyCode::Char('Q') => self.quit = true,
             KeyCode::Char('c') if mods.contains(KeyModifiers::CONTROL) => self.quit = true,
+            KeyCode::Char('?') | KeyCode::F(1) => self.about = true,
             KeyCode::Char(c @ '1'..='6') => self.tab = Tab::ALL[(c as u8 - b'1') as usize],
             KeyCode::Tab => {
                 let i = Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0);
@@ -760,6 +771,9 @@ fn next_key(from: Option<&'static layout::Key>, code: KeyCode) -> Option<&'stati
 
 fn draw(f: &mut Frame, app: &mut App) {
     pages::draw(f, app);
+    if app.about {
+        pages::about(f, app);
+    }
 }
 
 pub fn run() -> Result<()> {

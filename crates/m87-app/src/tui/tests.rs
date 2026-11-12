@@ -264,3 +264,28 @@ fn long_errors_are_not_cut() {
     println!("{s}");
     assert!(s.contains("then retry."), "{s}");
 }
+
+#[test]
+fn about_box_names_the_keyboard_and_license() {
+    let mut app = app();
+    app.battery = Some(100);
+    // At the minimum size the About button sits beside the longest status text.
+    let s = render(&mut app, 80, 24);
+    let top = s.lines().next().unwrap();
+    assert!(top.contains("Nodal M87 Pro") && top.contains("Battery: 100%") && top.contains(" About ") && top.contains("Quit (Q)"), "{top}");
+    click(&mut app, Hit::About);
+    let s = render(&mut app, 80, 24);
+    assert!(s.contains("Nodal Studio M87 Pro keyboard only"), "{s}");
+    assert!(s.contains("MIT or Apache-2.0"), "{s}");
+    assert!(s.contains("Sends no information over the network"), "{s}");
+    // Any key closes it without acting on the key.
+    app.on_key(KeyCode::Char('q'), KeyModifiers::NONE);
+    assert!(!app.about && !app.quit);
+    app.on_key(KeyCode::Char('?'), KeyModifiers::NONE);
+    assert!(app.about);
+    // A click anywhere closes it too.
+    render(&mut app, 80, 24);
+    let h = app.hit_at(1, 20).unwrap();
+    app.on_hit(h);
+    assert!(!app.about);
+}

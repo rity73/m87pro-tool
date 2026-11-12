@@ -17,7 +17,14 @@ use m87_core::state;
 use state::{LightMode, State};
 
 #[derive(Parser)]
-#[command(name = "m87", version, about = "Configure the M87 Pro keyboard. Run without a command to open the full-screen interface.")]
+#[command(
+    name = "m87",
+    version,
+    about = "Configure the Nodal Studio M87 Pro keyboard. Run without a command to open the full-screen interface.",
+    after_help = "For the Nodal Studio M87 Pro only (USB 0C45:8006, 2.4 GHz receiver 0C45:FEFE). Unofficial: not affiliated with Nodal Studio or Sonix.
+Copyright (c) 2026 rity73. Licensed under MIT or Apache-2.0, without warranty. Sends no information over the network.
+Source: https://github.com/rity73/m87pro-tool"
+)]
 struct Cli {
     /// Print every packet sent to and received from the keyboard.
     #[arg(short, long, global = true)]

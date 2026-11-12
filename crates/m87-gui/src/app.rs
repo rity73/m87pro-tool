@@ -33,10 +33,11 @@ pub enum Page {
     Macros,
     Settings,
     Profiles,
+    About,
 }
 
 impl Page {
-    pub const ALL: [Page; 6] = [Page::Lighting, Page::KeyColors, Page::Keys, Page::Macros, Page::Settings, Page::Profiles];
+    pub const ALL: [Page; 7] = [Page::Lighting, Page::KeyColors, Page::Keys, Page::Macros, Page::Settings, Page::Profiles, Page::About];
     pub fn title(self) -> T {
         match self {
             Page::Lighting => T::TabLighting,
@@ -45,6 +46,7 @@ impl Page {
             Page::Macros => T::TabMacros,
             Page::Settings => T::TabSettings,
             Page::Profiles => T::TabProfiles,
+            Page::About => T::TabAbout,
         }
     }
 }
@@ -197,7 +199,7 @@ impl App {
             Page::Keys => Job::Keys,
             Page::Macros => Job::Macros,
             Page::Settings => Job::Settings,
-            Page::Profiles => return None,
+            Page::Profiles | Page::About => return None,
         })
     }
 

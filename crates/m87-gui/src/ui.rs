@@ -216,6 +216,16 @@ mod id {
     pub const P_CONN: u16 = 257;
     pub const P_CHECK: u16 = 258;
     pub const P_DATA: u16 = 259;
+
+    pub const A_NAME: u16 = 270;
+    pub const A_ONLY: u16 = 271;
+    pub const A_UNOFFICIAL: u16 = 272;
+    pub const A_LICENSE_LBL: u16 = 273;
+    pub const A_LICENSE: u16 = 274;
+    pub const A_PRIVACY_LBL: u16 = 275;
+    pub const A_PRIVACY: u16 = 276;
+    pub const A_SOURCE_LBL: u16 = 277;
+    pub const A_SOURCE: u16 = 278;
 }
 
 // ---------------------------------------------------------------- small helpers
@@ -544,6 +554,17 @@ impl Ui {
         self.label(P_CONN, Some(Profiles), None, [24, 524, 600, 20]);
         self.button(P_CHECK, Profiles, T::CheckAgain, [630, 518, 160, 30]);
         self.label(P_DATA, Some(Profiles), None, [24, 556, 930, 20]);
+
+        // 7 About
+        self.add(A_NAME, Some(About), w!("STATIC"), None, SS_LEFT | SS_NOPREFIX, 0, [24, 84, 930, 22], Font::Bold);
+        self.label(A_ONLY, Some(About), Some(T::AboutOnly), [24, 116, 930, 40]);
+        self.label(A_UNOFFICIAL, Some(About), Some(T::AboutUnofficial), [24, 162, 930, 40]);
+        self.add(A_LICENSE_LBL, Some(About), w!("STATIC"), Some(T::AboutLicenseTitle), SS_LEFT | SS_NOPREFIX, 0, [24, 220, 300, 20], Font::Bold);
+        self.label(A_LICENSE, Some(About), Some(T::AboutLicense), [24, 244, 930, 40]);
+        self.add(A_PRIVACY_LBL, Some(About), w!("STATIC"), Some(T::AboutPrivacyTitle), SS_LEFT | SS_NOPREFIX, 0, [24, 302, 300, 20], Font::Bold);
+        self.label(A_PRIVACY, Some(About), Some(T::AboutPrivacy), [24, 326, 930, 40]);
+        self.add(A_SOURCE_LBL, Some(About), w!("STATIC"), Some(T::AboutSourceTitle), SS_LEFT | SS_NOPREFIX, 0, [24, 384, 300, 20], Font::Bold);
+        self.label(A_SOURCE, Some(About), None, [24, 408, 930, 20]);
 
     }
 
@@ -896,6 +917,10 @@ fn sync(g: &mut G) {
             ui.enable(P_DELETE, has);
             set_text(ui.h(P_CONN), &conn);
             set_text(ui.h(P_DATA), &format!("{} {}", t(T::DataFolder), state::data_dir().display()));
+        }
+        Page::About => {
+            set_text(ui.h(A_NAME), &format!("m87-gui {}  -  {}", env!("CARGO_PKG_VERSION"), t(T::AboutName)));
+            set_text(ui.h(A_SOURCE), "https://github.com/rity73/m87pro-tool");
         }
     }
 }
@@ -1362,7 +1387,7 @@ extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LR
                 if hdr.idFrom == id::TAB as usize && hdr.code == TCN_SELCHANGE {
                     with_g(|g| {
                         let i = send(g.ui.h(id::TAB), TCM_GETCURSEL, 0, 0).max(0) as usize;
-                        g.app.page = Page::ALL[i.min(5)];
+                        g.app.page = Page::ALL[i.min(Page::ALL.len() - 1)];
                         g.app.choosing_key = false;
                         if g.app.page == Page::Profiles {
                             let sel = g.app.selected_profile();

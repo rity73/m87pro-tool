@@ -49,13 +49,22 @@ macro_rules! strings {
 }
 
 strings! {
-    AppTitle => "M87 Pro Settings", "M87 Pro 설정";
+    AppTitle => "Nodal M87 Pro Settings", "Nodal M87 Pro 설정";
     TabLighting => "Lighting", "조명";
     TabKeyColors => "Key colors", "키 색상";
     TabKeys => "Key mapping", "키 매핑";
     TabMacros => "Macros", "매크로";
     TabSettings => "Settings", "설정";
     TabProfiles => "Profiles", "프로필";
+    TabAbout => "About", "정보";
+    AboutName => "Configuration tool for the Nodal Studio M87 Pro", "Nodal Studio M87 Pro 설정 도구";
+    AboutOnly => "For the Nodal Studio M87 Pro keyboard only (USB cable 0C45:8006, 2.4 GHz receiver 0C45:FEFE). Do not use it with other keyboards.", "Nodal Studio M87 Pro 키보드 전용입니다 (USB 케이블 0C45:8006, 2.4GHz 수신기 0C45:FEFE). 다른 키보드에는 쓰지 마세요.";
+    AboutUnofficial => "This is an unofficial program. It is not affiliated with, endorsed by or supported by Nodal Studio or Sonix.", "비공식 프로그램입니다. Nodal Studio 및 Sonix와 관계가 없으며, 이들이 보증하거나 지원하지 않습니다.";
+    AboutLicenseTitle => "License", "라이선스";
+    AboutLicense => "Copyright (c) 2026 rity73. Licensed under the MIT license or the Apache License 2.0, at your option. The program is provided \"as is\", without warranty of any kind.", "Copyright (c) 2026 rity73. MIT 라이선스 또는 Apache 라이선스 2.0 중 하나를 골라 따를 수 있습니다. 이 프로그램은 어떠한 보증도 없이 \"있는 그대로\" 제공됩니다.";
+    AboutPrivacyTitle => "Privacy", "개인정보";
+    AboutPrivacy => "This program sends no information over the network. It talks only to the keyboard, and settings are stored only on this PC.", "이 프로그램은 네트워크로 어떤 정보도 보내지 않습니다. 키보드하고만 통신하며, 설정은 이 PC에만 저장됩니다.";
+    AboutSourceTitle => "Source code", "소스 코드";
     ConnDongle => "Connected: 2.4 GHz receiver", "연결됨: 2.4GHz 수신기";
     ConnWired => "Connected: USB cable", "연결됨: USB 케이블";
     NotConnected => "Not connected. Connect the USB cable or plug in the 2.4 GHz receiver.", "연결 안 됨. USB 케이블을 연결하거나 2.4GHz 수신기를 꽂으세요.";

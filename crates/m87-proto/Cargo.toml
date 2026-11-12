@@ -1,0 +1,9 @@
+[package]
+name = "m87-proto"
+description = "Packet encoding for the M87 Pro keyboard configuration protocol (no I/O)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]

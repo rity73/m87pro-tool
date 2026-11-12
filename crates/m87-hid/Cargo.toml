@@ -1,0 +1,10 @@
+[package]
+name = "m87-hid"
+description = "HID discovery and transports for the M87 Pro keyboard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+m87-proto.workspace = true

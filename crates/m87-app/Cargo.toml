@@ -1,0 +1,18 @@
+[package]
+name = "m87-app"
+description = "Lightweight configuration tool for the M87 Pro keyboard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "m87"
+path = "src/main.rs"
+
+[dependencies]
+m87-proto.workspace = true
+m87-hid.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+ratatui.workspace = true

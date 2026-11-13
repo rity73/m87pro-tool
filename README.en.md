@@ -28,6 +28,9 @@ their About page (`m87`: the About button at the top; `m87-gui`: About in the le
 > This project is not affiliated with, endorsed by or supported by Nodal Studio or Sonix.
 > Use it at your own risk.
 
+> **AI use notice:** This project was written and developed using Claude, an AI model by Anthropic.
+> The author is responsible for it; Claude is a tool and not an author or contributor.
+
 ## Supported hardware
 
 | Connection | USB ID | Status |
@@ -68,6 +71,8 @@ Run `m87 --help` or `m87 <command> --help` for the full list.
 - Music-reactive and real-time lighting modes of the vendor app are not implemented.
 
 ## How it was made
+
+The code, documentation and protocol analysis were written using the AI model Claude; the author checked every feature on a real keyboard.
 
 The tool was written from scratch, for interoperability with hardware the author owns. The
 configuration protocol was worked out from the vendor app and then checked on a real keyboard;

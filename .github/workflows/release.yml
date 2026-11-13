@@ -104,9 +104,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A tag pushed again (for example after a history rewrite) must not
+          # replace files that were already published.
+          if gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            echo "::notice::Release ${{ github.ref_name }} already exists; it was left unchanged."
+            exit 0
+          fi
           gh release create "${{ github.ref_name }}" \
             --repo "${{ github.repository }}" \
             --title "${{ github.ref_name }}" \
-            --notes "Unofficial configuration tool for the Nodal Studio M87 Pro. See the [README](https://github.com/${{ github.repository }}#readme) for features and the [Code signing policy](https://github.com/${{ github.repository }}/blob/main/README.en.md#code-signing-policy)." \
+            --notes "Unofficial configuration tool for the Nodal Studio M87 Pro. See the [README](https://github.com/${{ github.repository }}#readme) for features and the [Code signing policy](https://github.com/${{ github.repository }}/blob/main/README.en.md#code-signing-policy).
+
+          Generated automatically using Claude (AI model)." \
             --generate-notes \
             dist/m87.exe dist/m87-gui.exe dist/SHA256SUMS.txt
